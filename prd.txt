@@ -1,0 +1,301 @@
+
+Product Requirements Document (PRD)
+
+Offline Mafia Game Manager (Hostless)
+
+⸻
+
+1. Overview
+
+Product Name: Offline Mafia Game Manager
+
+Purpose:
+A mobile-first web application that assists players in managing an offline, in-person Mafia game without requiring a human host. The system automatically manages roles, phases, night actions, voting, eliminations, and win conditions while players physically play together.
+
+Target Platform:
+	•	Mobile Web (Primary)
+	•	Desktop Web (Secondary)
+
+Tech Stack:
+	•	Frontend: Next.js (App Router)
+	•	Backend: Next.js API Routes / Server Actions (relay only, no persistence)
+	•	Database: None
+	•	Synchronization: Client-side polling + master device state broadcast
+	•	Optional: Progressive Web App (PWA)
+
+⸻
+
+2. Problem Statement
+
+Offline Mafia games commonly face issues such as:
+	•	Confusion around roles and actions
+	•	Accidental information leakage
+	•	Slow or unclear voting
+	•	Dependence on a biased or overwhelmed moderator
+
+This product removes the need for a moderator by acting as a neutral, rule-driven system that enforces the entire game lifecycle.
+
+⸻
+
+3. Goals & Non-Goals
+
+Goals
+	•	Enable smooth Mafia gameplay for offline groups
+	•	Preserve secrecy of roles and actions
+	•	Eliminate the need for a host
+	•	Support reconnects and refreshes
+	•	Minimize infrastructure complexity using polling
+
+Non-Goals (MVP)
+	•	In-app chat or voice
+	•	Custom role builders
+	•	Game analytics or history
+	•	AI narration
+
+⸻
+
+4. Core Principles
+	•	Hostless: No special admin or moderator role
+	•	Simple: Minimal rules, minimal UI
+	•	Fair: Deterministic, transparent system rules
+	•	Resumable: Active games persist across reloads on each device
+	•	Offline-Friendly: Works on shared Wi-Fi or hotspot
+
+⸻
+
+5. User Roles
+
+Player
+	•	Can create or join a game
+	•	Receives exactly one secret role
+	•	Performs actions only when eligible
+	•	Votes during voting phase
+	•	Cannot access hidden or global game state
+
+There is no separate host or admin role.
+
+⸻
+
+6. User Flow
+
+6.1 App Entry
+	•	On application load:
+	•	Check localStorage for gameId
+	•	Fetch game from backend
+	•	If game exists and status is ACTIVE, resume game
+	•	Otherwise show Create / Join screen
+
+⸻
+
+6.2 Create Game
+	•	First player selects Create Game
+	•	System:
+	•	Generates a unique gameId
+	•	Creates game in CREATED state
+	•	Adds creator as the first player
+	•	Game code / QR is shown for others to join
+
+⸻
+
+6.3 Join Game
+	•	Players join using:
+	•	Game code or QR
+	•	Enter nickname
+	•	Added to lobby
+	•	Lobby player list visible to all
+
+⸻
+
+7. Game Lifecycle & Phases
+
+Phase State Machine
+
+CREATED → LOBBY → NIGHT → DAY → VOTING → RESOLUTION → (NIGHT or GAME_OVER)
+	•	Phase transitions are automatic
+	•	Optional timers can control phase duration
+	•	All players always see the current phase
+
+⸻
+
+8. Role Management
+
+Supported Roles (MVP)
+	•	Mafia
+	•	Villager
+	•	Doctor
+	•	Detective
+
+Role Assignment
+	•	Occurs when game transitions from LOBBY to NIGHT
+	•	Roles assigned randomly based on player count
+	•	Each player sees only their own role
+	•	Mafia members may see each other (configurable)
+
+⸻
+
+9. Night Phase
+
+Behavior
+	•	Only eligible roles receive action UI
+	•	Each eligible player may submit one action
+	•	Actions are private and hidden from all other players
+
+Example Actions
+	•	Mafia selects a kill target
+	•	Doctor selects a save target
+	•	Detective inspects a player
+
+Completion Conditions
+	•	All required actions are submitted, or
+	•	Night timer expires
+
+⸻
+
+10. Action Resolution
+	•	Actions are resolved server-side in fixed order:
+	1.	Mafia kill
+	2.	Doctor save
+	3.	Detective inspection
+	•	Results are persisted securely
+	•	Player deaths are revealed at the start of Day phase
+
+⸻
+
+11. Day Phase
+	•	Players discuss offline (face-to-face)
+	•	App displays:
+	•	List of alive players
+	•	Optional countdown timer
+	•	No in-app discussion or chat
+
+⸻
+
+12. Voting Phase
+
+Voting Rules
+	•	Only alive players can vote
+	•	Each player may vote once
+	•	Voting is secret
+	•	Votes are submitted through the app
+
+Completion Conditions
+	•	All alive players have voted, or
+	•	Voting timer expires
+
+⸻
+
+13. Voting Tie Resolution
+
+Rule (MVP)
+
+If multiple players receive the highest number of votes, no player is eliminated.
+
+Behavior
+	•	System displays a tie message
+	•	Game advances directly to the next Night phase
+
+⸻
+
+14. Elimination & Win Conditions
+
+Elimination
+	•	Eliminated players:
+	•	Are marked alive = false
+	•	Lose voting and action access
+	•	May optionally view game as spectators
+
+Win Conditions
+	•	Mafia count equals zero → Villagers win
+	•	Mafia count is greater than or equal to Villagers → Mafia wins
+
+Game status is set to COMPLETED.
+
+⸻
+
+15. Sync & Polling Strategy
+	•	Client polling interval: 2–5 seconds
+	•	Master device broadcasts authoritative game state to others
+	•	Relay backend is stateless and does not persist data
+	•	All clients keep a full local copy of the game state
+	•	APIs must be idempotent
+	•	Duplicate actions and votes are rejected server-side
+	•	If a device loses data, it can resync from the master or any active client
+
+15.1 Master Device
+	•	Default master is the game creator
+	• Master is communicated to all clients via shared game state
+	• On master disconnect, the active client with the lowest playerId becomes master
+	• Master duties: validate actions, advance phases, resolve nights, and publish state
+
+⸻
+
+16. Data Model (High-Level)
+
+Game
+	•	id
+	•	status (ACTIVE, COMPLETED)
+	•	phase
+	•	settings
+	•	currentNight
+	•	masterPlayerId
+	•	createdAt
+	•	updatedAt
+
+Player
+	•	id
+	•	gameId
+	•	name
+	•	role
+	•	alive
+	•	joinedAt
+
+Action
+	•	gameId
+	•	nightNumber
+	•	playerId
+	•	type
+	•	targetPlayerId
+
+Vote
+	•	gameId
+	•	phaseId
+	•	voterId
+	•	targetPlayerId
+
+⸻
+
+17. Non-Functional Requirements
+	•	Mobile-first responsive UI
+	•	Safe refresh and reconnect
+	•	No information leakage between players
+	•	Supports 5–30 players
+	•	Low server and network load
+
+⸻
+
+18. MVP Scope Summary
+
+Included
+	•	Create and join game
+	•	Role assignment
+	•	Night actions
+	•	Voting
+	•	Tie handling (no elimination)
+	•	Win detection
+	•	Game resume
+
+Excluded
+	•	Chat
+	•	Custom roles
+	•	Match history
+	•	Analytics
+	•	AI features
+
+⸻
+
+19. Future Enhancements
+	•	Custom rule presets
+	•	Optional revote setting
+	•	Spectator-only view
+	•	Game replay
+	•	Multi-language support
