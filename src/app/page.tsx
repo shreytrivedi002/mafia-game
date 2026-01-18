@@ -43,12 +43,14 @@ type ClientInfo = {
 type MasterCache = {
   eventCursor: number;
   nightActions: Map<number, Action[]>;
+  nightRituals: Map<number, Map<string, { promptId: string; choice: string }>>;
   votes: Map<string, Vote[]>;
 };
 
 const initialMasterCache: MasterCache = {
   eventCursor: 0,
   nightActions: new Map(),
+  nightRituals: new Map(),
   votes: new Map(),
 };
 
@@ -70,6 +72,213 @@ function getPhaseDurationSeconds(phase: GameState["phase"], settings: GameSettin
   if (phase === "DAY") return settings.daySeconds;
   if (phase === "VOTING") return settings.votingSeconds;
   return null;
+}
+
+type PhaseScene = {
+  title: string;
+  subtitle: string;
+  accent: "violet" | "cyan" | "amber" | "emerald" | "rose";
+  bgClass: string;
+  icon: React.ReactNode;
+};
+
+function phaseToScene(phase: GameState["phase"], nightNumber: number): PhaseScene {
+  const baseIconClass = "h-10 w-10";
+
+  const moonIcon = (
+    <svg
+      className={baseIconClass}
+      viewBox="0 0 24 24"
+      fill="none"
+      aria-hidden="true"
+    >
+      <path
+        d="M21 14.6A8.6 8.6 0 1 1 9.4 3a7.2 7.2 0 0 0 11.6 11.6Z"
+        stroke="currentColor"
+        strokeWidth="1.8"
+      />
+      <path
+        d="M15.5 7.2l.4 1.3 1.3.4-1.3.4-.4 1.3-.4-1.3-1.3-.4 1.3-.4.4-1.3Z"
+        fill="currentColor"
+        opacity="0.7"
+      />
+    </svg>
+  );
+
+  const sunIcon = (
+    <svg className={baseIconClass} viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <circle cx="12" cy="12" r="4.5" stroke="currentColor" strokeWidth="1.8" />
+      <path
+        d="M12 2v2.5M12 19.5V22M4.2 4.2l1.8 1.8M18 18l1.8 1.8M2 12h2.5M19.5 12H22M4.2 19.8 6 18M18 6l1.8-1.8"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+      />
+    </svg>
+  );
+
+  const voteIcon = (
+    <svg className={baseIconClass} viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <path
+        d="M7 11h10M7 15h6"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+      />
+      <path
+        d="M7.5 3h9A2.5 2.5 0 0 1 19 5.5v13A2.5 2.5 0 0 1 16.5 21h-9A2.5 2.5 0 0 1 5 18.5v-13A2.5 2.5 0 0 1 7.5 3Z"
+        stroke="currentColor"
+        strokeWidth="1.8"
+      />
+      <path
+        d="M9 8l1.6 1.6L14.5 5.7"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+
+  const resolveIcon = (
+    <svg className={baseIconClass} viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <path
+        d="M12 3v18"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+      />
+      <path
+        d="M6 7h12"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+      />
+      <path
+        d="M7.5 7 5 12.5a3 3 0 0 0 6 0L8.5 7"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinejoin="round"
+      />
+      <path
+        d="M16.5 7 14 12.5a3 3 0 0 0 6 0L17.5 7"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+
+  const gameOverIcon = (
+    <svg className={baseIconClass} viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <path
+        d="M8 21h8M12 17v4"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+      />
+      <path
+        d="M7 3h10v4a5 5 0 0 1-10 0V3Z"
+        stroke="currentColor"
+        strokeWidth="1.8"
+      />
+      <path
+        d="M7 5H4v2a3 3 0 0 0 3 3M17 5h3v2a3 3 0 0 1-3 3"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+      />
+    </svg>
+  );
+
+  if (phase === "LOBBY") {
+    return {
+      title: "Lobby",
+      subtitle: "Gather players. Master configures timers and starts the game.",
+      accent: "violet",
+      bgClass: "bg-gradient-to-b from-violet-950 via-slate-950 to-black",
+      icon: moonIcon,
+    };
+  }
+
+  if (phase === "NIGHT") {
+    return {
+      title: `Night ${nightNumber}`,
+      subtitle: "Eyes closed. Roles act in secret.",
+      accent: "cyan",
+      bgClass: "bg-gradient-to-b from-slate-950 via-slate-950 to-black",
+      icon: moonIcon,
+    };
+  }
+
+  if (phase === "DAY") {
+    return {
+      title: "Day",
+      subtitle: "Discuss face-to-face. Decide who seems suspicious.",
+      accent: "amber",
+      bgClass: "bg-gradient-to-b from-amber-950/60 via-slate-950 to-black",
+      icon: sunIcon,
+    };
+  }
+
+  if (phase === "VOTING") {
+    return {
+      title: "Voting",
+      subtitle: "Vote in secret. Majority wins. Ties eliminate no one.",
+      accent: "amber",
+      bgClass: "bg-gradient-to-b from-amber-950/70 via-slate-950 to-black",
+      icon: voteIcon,
+    };
+  }
+
+  if (phase === "RESOLUTION") {
+    return {
+      title: "Resolution",
+      subtitle: "The town learns what happened.",
+      accent: "emerald",
+      bgClass: "bg-gradient-to-b from-emerald-950/55 via-slate-950 to-black",
+      icon: resolveIcon,
+    };
+  }
+
+  return {
+    title: "Game Over",
+    subtitle: "A winner has been decided.",
+    accent: "rose",
+    bgClass: "bg-gradient-to-b from-rose-950/60 via-slate-950 to-black",
+    icon: gameOverIcon,
+  };
+}
+
+const NIGHT_RITUALS: Array<{
+  id: string;
+  prompt: string;
+  choices: string[];
+}> = [
+  {
+    id: "FINGERPRINT",
+    prompt: "Night ritual: pick a totally useless fingerprint.",
+    choices: ["Left thumb", "Right thumb", "Pinky", "No comment"],
+  },
+  {
+    id: "VIBE_CHECK",
+    prompt: "Night ritual: choose your vibe (does not affect the game).",
+    choices: ["Innocent", "Sneaky", "Confused", "Chaos"],
+  },
+  {
+    id: "MOON_OATH",
+    prompt: "Night ritual: swear an oath to the moon.",
+    choices: ["I swear", "I double swear", "I pinky swear", "I refuse (still ok)"],
+  },
+];
+
+function pickRitual(nightNumber: number, playerId: string) {
+  const raw = `${nightNumber}:${playerId}`;
+  let hash = 0;
+  for (let i = 0; i < raw.length; i += 1) {
+    hash = (hash * 31 + raw.charCodeAt(i)) >>> 0;
+  }
+  return NIGHT_RITUALS[hash % NIGHT_RITUALS.length];
 }
 
 async function relayGetState(gameId: string): Promise<GameState | null> {
@@ -185,6 +394,10 @@ export default function Home() {
   const [inspectionResults, setInspectionResults] = useState<SecretMessage[]>([]);
   const [lastStateAt, setLastStateAt] = useState<number | null>(null);
   const [settingsDraft, setSettingsDraft] = useState<GameSettings | null>(null);
+  const [infoCardFlipped, setInfoCardFlipped] = useState(false);
+  const [playersDrawerOpen, setPlayersDrawerOpen] = useState(false);
+  const [ritualChoice, setRitualChoice] = useState<string>("");
+  const [ritualSubmittedNight, setRitualSubmittedNight] = useState<number | null>(null);
 
   const masterCacheRef = useRef<MasterCache>(initialMasterCache);
   const autoTakeoverAttemptVersionRef = useRef<number | null>(null);
@@ -288,11 +501,26 @@ export default function Home() {
   }, [client]);
 
   useEffect(() => {
+    if (!statusMessage) {
+      return;
+    }
+    const timeout = window.setTimeout(() => setStatusMessage(null), 3200);
+    return () => window.clearTimeout(timeout);
+  }, [statusMessage]);
+
+  useEffect(() => {
     if (!gameState) {
       return;
     }
     setSettingsDraft((prev) => prev ?? gameState.settings);
   }, [gameState?.id]);
+
+  useEffect(() => {
+    setInfoCardFlipped(false);
+    setPlayersDrawerOpen(false);
+    setRitualChoice("");
+    setRitualSubmittedNight(null);
+  }, [gameState?.phase]);
 
   useEffect(() => {
     if (!client || !gameState || !isMaster) {
@@ -371,7 +599,9 @@ export default function Home() {
       }
 
       if (gameState.phase === "NIGHT") {
-        attemptNightResolution(true);
+        // Night should not auto-resolve just because the timer hit zero.
+        // It resolves when all required actions are submitted AND all non-action players confirm ritual.
+        attemptNightResolution(false);
       } else if (gameState.phase === "DAY") {
         handleStartVoting();
       } else if (gameState.phase === "VOTING") {
@@ -439,6 +669,21 @@ export default function Home() {
       return;
     }
 
+    if (event.type === "RITUAL") {
+      const ritual = event.payload;
+      if (gameState.phase !== "NIGHT" || ritual.nightNumber !== gameState.currentNight) {
+        return;
+      }
+      const rituals =
+        masterCacheRef.current.nightRituals.get(ritual.nightNumber) ?? new Map();
+      if (!rituals.has(ritual.playerId)) {
+        rituals.set(ritual.playerId, { promptId: ritual.promptId, choice: ritual.choice });
+        masterCacheRef.current.nightRituals.set(ritual.nightNumber, rituals);
+      }
+      attemptNightResolution(false);
+      return;
+    }
+
     if (event.type === "VOTE") {
       const vote = event.payload;
       if (gameState.phase !== "VOTING" || !gameState.phaseId) {
@@ -469,10 +714,13 @@ export default function Home() {
     }
     const roleMap = loadMasterRoles();
     const playersWithRoles = withRoles(gameState.players, roleMap);
-    const requiredRoles = new Set(
-      playersWithRoles
-        .filter((player) => player.alive && player.role)
-        .map((player) => player.role as Role),
+    const aliveWithRole = playersWithRoles.filter((player) => player.alive && player.role);
+    const requiredRoles = new Set(aliveWithRole.map((player) => player.role as Role));
+    const aliveActionPlayers = aliveWithRole.filter((player) =>
+      player.role === "MAFIA" || player.role === "DOCTOR" || player.role === "DETECTIVE",
+    );
+    const aliveRitualPlayers = playersWithRoles.filter(
+      (player) => player.alive && (!player.role || player.role === "VILLAGER"),
     );
 
     const actions = masterCacheRef.current.nightActions.get(gameState.currentNight) ?? [];
@@ -491,10 +739,30 @@ export default function Home() {
       return;
     }
 
+    if (!force) {
+      const rituals =
+        masterCacheRef.current.nightRituals.get(gameState.currentNight) ?? new Map();
+      const allRitualConfirmed = aliveRitualPlayers.every((player) => rituals.has(player.id));
+      if (!allRitualConfirmed) {
+        return;
+      }
+
+      const allActionSubmitted = aliveActionPlayers.every((player) =>
+        actions.some((action) => action.playerId === player.id),
+      );
+      if (!allActionSubmitted) {
+        return;
+      }
+    }
+
     const result = resolveNightActions(
       { ...gameState, players: playersWithRoles },
       actions,
     );
+    const killedRole =
+      gameState.settings.revealRoleOnDeath && result.killedPlayerId
+        ? roleMap[result.killedPlayerId]
+        : undefined;
 
     for (const inspection of result.inspectionResults) {
       await relaySendSecret(gameState.id, inspection.detectiveId, {
@@ -509,6 +777,7 @@ export default function Home() {
     }
 
     masterCacheRef.current.nightActions.delete(gameState.currentNight);
+    masterCacheRef.current.nightRituals.delete(gameState.currentNight);
     const next = {
       ...gameState,
       players: result.updatedPlayers,
@@ -517,6 +786,7 @@ export default function Home() {
       lastResolution: {
         killedPlayerId: result.killedPlayerId,
         savedPlayerId: result.savedPlayerId,
+        killedRole,
       },
       version: gameState.version + 1,
     };
@@ -535,16 +805,23 @@ export default function Home() {
     const playersWithRoles = withRoles(gameState.players, roleMap);
     const result = resolveVotes({ ...gameState, players: playersWithRoles }, votes);
     const winner = checkWin(result.updatedPlayers);
+    const revealedRoles = winner ? roleMap : undefined;
+    const eliminatedRole =
+      gameState.settings.revealRoleOnDeath && result.eliminatedPlayerId
+        ? roleMap[result.eliminatedPlayerId]
+        : undefined;
     const next = {
       ...gameState,
       players: result.updatedPlayers,
       phase: winner ? "GAME_OVER" : "RESOLUTION",
       status: winner ? "COMPLETED" : gameState.status,
       winner: winner ?? gameState.winner,
+      revealedRoles: revealedRoles ?? gameState.revealedRoles,
       phaseStartedAt: Date.now(),
       lastVoteResult: {
         eliminatedPlayerId: result.eliminatedPlayerId,
         tie: result.tie,
+        eliminatedRole,
       },
       version: gameState.version + 1,
     };
@@ -560,6 +837,7 @@ export default function Home() {
     masterCacheRef.current = {
       eventCursor: 0,
       nightActions: new Map(),
+      nightRituals: new Map(),
       votes: new Map(),
     };
     const gameId = generateId(6);
@@ -599,6 +877,7 @@ export default function Home() {
     masterCacheRef.current = {
       eventCursor: 0,
       nightActions: new Map(),
+      nightRituals: new Map(),
       votes: new Map(),
     };
     const gameId = joinCode.trim().toUpperCase();
@@ -652,6 +931,7 @@ export default function Home() {
     }
 
     masterCacheRef.current.nightActions.clear();
+    masterCacheRef.current.nightRituals.clear();
     masterCacheRef.current.votes.clear();
     const next: GameState = {
       ...gameState,
@@ -694,6 +974,7 @@ export default function Home() {
       return;
     }
     masterCacheRef.current.nightActions.clear();
+    masterCacheRef.current.nightRituals.clear();
     masterCacheRef.current.votes.clear();
     const next = {
       ...gameState,
@@ -715,6 +996,7 @@ export default function Home() {
     }
 
     masterCacheRef.current.nightActions.clear();
+    masterCacheRef.current.nightRituals.clear();
     masterCacheRef.current.votes.clear();
     localStorage.removeItem(STORAGE_KEYS.masterRoles);
 
@@ -743,6 +1025,7 @@ export default function Home() {
       lastResolution: undefined,
       lastVoteResult: undefined,
       winner: undefined,
+      revealedRoles: undefined,
       players: resetPlayers,
       version: gameState.version + 1,
     };
@@ -761,6 +1044,7 @@ export default function Home() {
         daySeconds: clampNumber(settingsDraft.daySeconds, 10, 60 * 60),
         votingSeconds: clampNumber(settingsDraft.votingSeconds, 10, 60 * 30),
         autoAdvance: settingsDraft.autoAdvance,
+        revealRoleOnDeath: settingsDraft.revealRoleOnDeath,
       },
       version: gameState.version + 1,
     };
@@ -794,6 +1078,34 @@ export default function Home() {
       payload: action,
     });
     setSelectedTarget("");
+  };
+
+  const handleSubmitRitual = async () => {
+    if (!client || !gameState) {
+      return;
+    }
+    if (gameState.phase !== "NIGHT") {
+      return;
+    }
+    if (!ritualChoice) {
+      setStatusMessage("Pick an option to complete your night ritual.");
+      return;
+    }
+    const ritual = pickRitual(gameState.currentNight, client.playerId);
+    await relaySendEvent(gameState.id, {
+      type: "RITUAL",
+      id: generateId(12),
+      createdAt: Date.now(),
+      payload: {
+        gameId: gameState.id,
+        nightNumber: gameState.currentNight,
+        playerId: client.playerId,
+        promptId: ritual.id,
+        choice: ritualChoice,
+      },
+    });
+    setRitualSubmittedNight(gameState.currentNight);
+    setStatusMessage("Ritual complete. Waiting for others…");
   };
 
   const handleSubmitVote = async () => {
@@ -838,12 +1150,13 @@ export default function Home() {
     masterCacheRef.current = {
       eventCursor: 0,
       nightActions: new Map(),
+      nightRituals: new Map(),
       votes: new Map(),
     };
   };
 
   if (!client) {
-    return (
+  return (
       <div className="min-h-screen bg-gradient-to-br from-violet-950 via-slate-950 to-black px-6 py-10 text-white">
         <div className="mx-auto w-full max-w-xl space-y-6 rounded-3xl bg-white/10 p-6 shadow-2xl ring-1 ring-white/10 backdrop-blur">
           <div className="flex items-center justify-between">
@@ -913,180 +1226,345 @@ export default function Home() {
   const remainingSeconds =
     duration === null ? null : duration - (Date.now() - gameState.phaseStartedAt) / 1000;
   const isStale = lastStateAt ? Date.now() - lastStateAt > MASTER_STALE_MS : false;
+  const scene = phaseToScene(gameState.phase, gameState.currentNight);
+  const aliveCount = alivePlayers.length;
+  const totalCount = gameState.players.length;
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-violet-950 via-slate-950 to-black px-6 py-10 text-white">
-      <div className="mx-auto w-full max-w-3xl space-y-6">
-        <header className="rounded-3xl bg-white/10 p-6 shadow-2xl ring-1 ring-white/10 backdrop-blur">
-          <div className="flex flex-wrap items-center justify-between gap-4">
-            <div>
-              <p className="text-xs uppercase tracking-wide text-white/60">Game Code</p>
-              <p className="text-2xl font-semibold">{gameState.id}</p>
-            </div>
-            <div className="text-right">
-              <p className="text-sm text-white/60">Player</p>
-              <p className="font-semibold">{client.playerName}</p>
-              {playerRole && (
-                <p className="text-xs uppercase tracking-wide text-white/70">
-                  Role: {playerRole}
+    <div className={`min-h-screen ${scene.bgClass} text-white`}>
+      <div className="pointer-events-none absolute inset-0 opacity-50">
+        <div className="bg-stars absolute inset-0" />
+      </div>
+
+      <div className="relative min-h-screen pb-24">
+        <div className="mx-auto w-full max-w-xl px-4 pt-5">
+          {/* Top bar */}
+          <div className="flex items-start justify-between gap-3">
+            <button
+              type="button"
+              className={`flip-card ${infoCardFlipped ? "flip-flipped" : ""} w-[210px] max-w-[70vw]`}
+              onClick={() => setInfoCardFlipped((v) => !v)}
+              aria-label="Show game info"
+            >
+              <div className="flip-inner relative h-[84px] w-full">
+                <div className="flip-face absolute inset-0 rounded-2xl bg-white/10 p-3 shadow-2xl ring-1 ring-white/10 backdrop-blur">
+                  <p className="text-[11px] uppercase tracking-wide text-white/60">
+                    Player
+                  </p>
+                  <p className="truncate text-lg font-semibold leading-6">
+                    {client.playerName}
+                  </p>
+                  <p className="mt-1 text-xs text-white/60">
+                    Tap to flip • {aliveCount}/{totalCount} alive
+                  </p>
+                </div>
+                <div className="flip-face flip-back absolute inset-0 rounded-2xl bg-white/10 p-3 shadow-2xl ring-1 ring-white/10 backdrop-blur">
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="min-w-0">
+                      <p className="text-[11px] uppercase tracking-wide text-white/60">
+                        Game
+                      </p>
+                      <p className="text-lg font-semibold leading-6">{gameState.id}</p>
+                    </div>
+                    {isMaster && (
+                      <span className="rounded-full bg-emerald-400/20 px-2 py-1 text-[10px] font-semibold text-emerald-200 ring-1 ring-emerald-300/20">
+                        MASTER
+                      </span>
+                    )}
+                  </div>
+                  <p className="mt-2 text-xs text-white/70">
+                    Role:{" "}
+                    <span className="font-semibold text-white">
+                      {playerRole ?? "Hidden"}
+                    </span>
+                  </p>
+                </div>
+              </div>
+            </button>
+
+            <div className="flex flex-col items-end gap-2">
+              <div className="rounded-2xl bg-white/10 px-4 py-3 text-right shadow-2xl ring-1 ring-white/10 backdrop-blur">
+                <p className="text-[11px] uppercase tracking-wide text-white/60">
+                  Time left
                 </p>
+                <p
+                  className={`text-xl font-semibold ${
+                    remainingSeconds !== null && remainingSeconds <= 10
+                      ? "text-amber-200"
+                      : "text-white"
+                  }`}
+                >
+                  {remainingSeconds === null ? "—" : formatSeconds(remainingSeconds)}
+                </p>
+              </div>
+              {isStale && !isMaster && (
+                <button
+                  className="rounded-xl bg-white/10 px-3 py-2 text-xs font-semibold text-white ring-1 ring-white/15 transition hover:bg-white/15"
+                  onClick={handleTakeOver}
+                  type="button"
+                >
+                  Take over (master inactive)
+                </button>
               )}
             </div>
           </div>
-          <div className="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-2xl bg-white/10 px-4 py-3 ring-1 ring-white/10">
-            <div>
-              <p className="text-xs uppercase tracking-wide text-white/60">Phase</p>
-              <p className="text-lg font-semibold">{gameState.phase.replace("_", " ")}</p>
-            </div>
-            <div className="text-right">
-              <p className="text-xs uppercase tracking-wide text-white/60">Time Left</p>
-              <p className="text-lg font-semibold">
-                {remainingSeconds === null ? "—" : formatSeconds(remainingSeconds)}
-              </p>
-            </div>
-          </div>
-        </header>
 
-        <section className="rounded-3xl bg-white/10 p-6 shadow-2xl ring-1 ring-white/10 backdrop-blur">
-          <div className="flex items-center justify-between">
-            <h2 className="text-lg font-semibold">
-              Phase: {gameState.phase.replace("_", " ")}
-            </h2>
-            {isMaster && (
-              <span className="rounded-full bg-emerald-400/20 px-3 py-1 text-xs font-semibold text-emerald-200 ring-1 ring-emerald-300/20">
-                Master device
-              </span>
-            )}
+          {/* Phase scene */}
+          <div className="mt-8 text-center">
+            <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-3xl bg-white/10 shadow-2xl ring-1 ring-white/10 backdrop-blur">
+              <div className="text-white">{scene.icon}</div>
+            </div>
+            <h1 className="mt-4 text-3xl font-semibold tracking-tight">{scene.title}</h1>
+            <p className="mt-2 text-sm text-white/75">{scene.subtitle}</p>
           </div>
-          <div className="mt-4 grid gap-3 sm:grid-cols-2">
-            {gameState.players.map((player) => (
-              <div
-                key={player.id}
-                className={`rounded-2xl border px-4 py-3 ${
-                  player.alive
-                    ? "border-white/10 bg-white/5"
-                    : "border-red-400/30 bg-red-500/10"
-                }`}
-              >
-                <p className="font-medium">{player.name}</p>
-                <p className={`text-xs ${player.alive ? "text-white/60" : "text-red-200"}`}>
-                  {player.alive ? "Alive" : "Eliminated"}
-                </p>
-              </div>
-            ))}
-          </div>
-        </section>
 
-        {gameState.phase === "LOBBY" && (
-          <section className="rounded-3xl bg-white/10 p-6 shadow-2xl ring-1 ring-white/10 backdrop-blur">
-            <h2 className="text-lg font-semibold">Lobby</h2>
-            <p className="mt-2 text-sm text-white/80">
-              Share the game code to let others join. When ready, the master device
-              starts the game.
-            </p>
-            <p className="mt-2 text-sm text-white/80">
-              Minimum players to start: {MIN_PLAYERS_TO_START}.
-            </p>
-            {isMaster && settingsDraft && (
-              <div className="mt-4 space-y-3 rounded-2xl border border-white/10 bg-white/5 p-4">
-                <p className="text-sm font-semibold">Game settings</p>
-                <div className="grid gap-3 sm:grid-cols-3">
-                  <label className="text-sm">
-                    <span className="text-white/70">Night (sec)</span>
-                    <input
-                      className="mt-1 w-full rounded-xl border border-white/10 bg-white/10 px-3 py-2 text-white outline-none focus:ring-2 focus:ring-violet-400/70"
-                      type="number"
-                      min={10}
-                      max={1800}
-                      value={settingsDraft.nightSeconds}
-                      onChange={(e) =>
-                        setSettingsDraft((prev) =>
-                          prev
-                            ? { ...prev, nightSeconds: Number(e.target.value) }
-                            : prev,
-                        )
-                      }
-                    />
-                  </label>
-                  <label className="text-sm">
-                    <span className="text-white/70">Day (sec)</span>
-                    <input
-                      className="mt-1 w-full rounded-xl border border-white/10 bg-white/10 px-3 py-2 text-white outline-none focus:ring-2 focus:ring-violet-400/70"
-                      type="number"
-                      min={10}
-                      max={3600}
-                      value={settingsDraft.daySeconds}
-                      onChange={(e) =>
-                        setSettingsDraft((prev) =>
-                          prev ? { ...prev, daySeconds: Number(e.target.value) } : prev,
-                        )
-                      }
-                    />
-                  </label>
-                  <label className="text-sm">
-                    <span className="text-white/70">Voting (sec)</span>
-                    <input
-                      className="mt-1 w-full rounded-xl border border-white/10 bg-white/10 px-3 py-2 text-white outline-none focus:ring-2 focus:ring-violet-400/70"
-                      type="number"
-                      min={10}
-                      max={1800}
-                      value={settingsDraft.votingSeconds}
-                      onChange={(e) =>
-                        setSettingsDraft((prev) =>
-                          prev
-                            ? { ...prev, votingSeconds: Number(e.target.value) }
-                            : prev,
-                        )
-                      }
-                    />
-                  </label>
+          {/* Main action panel */}
+          <div className="mt-8 rounded-3xl bg-white/10 p-5 shadow-2xl ring-1 ring-white/10 backdrop-blur">
+            {gameState.phase === "LOBBY" && (
+              <div className="space-y-4">
+                <div className="space-y-1">
+                  <p className="text-sm text-white/80">
+                    Ask friends to join with the game code. Minimum{" "}
+                    {MIN_PLAYERS_TO_START} players to start.
+                  </p>
+                  <p className="text-xs text-white/60">
+                    Tip: everyone can keep this open; the game is resumable.
+                  </p>
                 </div>
-                <label className="flex items-center gap-2 text-sm text-white/80">
-                  <input
-                    type="checkbox"
-                    checked={settingsDraft.autoAdvance}
-                    onChange={(e) =>
-                      setSettingsDraft((prev) =>
-                        prev ? { ...prev, autoAdvance: e.target.checked } : prev,
-                      )
-                    }
-                  />
-                  Auto-advance phases when timer expires
-                </label>
-                <button
-                  className="rounded-xl bg-white/10 px-4 py-2 text-sm font-semibold text-white ring-1 ring-white/15 transition hover:bg-white/15"
-                  onClick={handleSaveSettings}
-                >
-                  Save settings
-                </button>
+
+                {isMaster && settingsDraft && (
+                  <details className="rounded-2xl border border-white/10 bg-white/5 p-4">
+                    <summary className="cursor-pointer select-none text-sm font-semibold text-white">
+                      Settings
+                    </summary>
+                    <div className="mt-4 grid gap-3">
+                      <div className="grid gap-3 sm:grid-cols-3">
+                        <label className="text-sm">
+                          <span className="text-white/70">Night (sec)</span>
+                          <input
+                            className="mt-1 w-full rounded-xl border border-white/10 bg-white/10 px-3 py-2 text-white outline-none focus:ring-2 focus:ring-violet-400/70"
+                            type="number"
+                            min={10}
+                            max={1800}
+                            value={settingsDraft.nightSeconds}
+                            onChange={(e) =>
+                              setSettingsDraft((prev) =>
+                                prev
+                                  ? { ...prev, nightSeconds: Number(e.target.value) }
+                                  : prev,
+                              )
+                            }
+                          />
+                        </label>
+                        <label className="text-sm">
+                          <span className="text-white/70">Day (sec)</span>
+                          <input
+                            className="mt-1 w-full rounded-xl border border-white/10 bg-white/10 px-3 py-2 text-white outline-none focus:ring-2 focus:ring-violet-400/70"
+                            type="number"
+                            min={10}
+                            max={3600}
+                            value={settingsDraft.daySeconds}
+                            onChange={(e) =>
+                              setSettingsDraft((prev) =>
+                                prev
+                                  ? { ...prev, daySeconds: Number(e.target.value) }
+                                  : prev,
+                              )
+                            }
+                          />
+                        </label>
+                        <label className="text-sm">
+                          <span className="text-white/70">Voting (sec)</span>
+                          <input
+                            className="mt-1 w-full rounded-xl border border-white/10 bg-white/10 px-3 py-2 text-white outline-none focus:ring-2 focus:ring-violet-400/70"
+                            type="number"
+                            min={10}
+                            max={1800}
+                            value={settingsDraft.votingSeconds}
+                            onChange={(e) =>
+                              setSettingsDraft((prev) =>
+                                prev
+                                  ? {
+                                      ...prev,
+                                      votingSeconds: Number(e.target.value),
+                                    }
+                                  : prev,
+                              )
+                            }
+                          />
+                        </label>
+                      </div>
+
+                      <label className="flex items-center gap-2 text-sm text-white/80">
+                        <input
+                          type="checkbox"
+                          checked={settingsDraft.autoAdvance}
+                          onChange={(e) =>
+                            setSettingsDraft((prev) =>
+                              prev ? { ...prev, autoAdvance: e.target.checked } : prev,
+                            )
+                          }
+                        />
+                        Auto-advance phases when timer expires
+                      </label>
+
+                      <label className="flex items-center gap-2 text-sm text-white/80">
+                        <input
+                          type="checkbox"
+                          checked={settingsDraft.revealRoleOnDeath}
+                          onChange={(e) =>
+                            setSettingsDraft((prev) =>
+                              prev
+                                ? { ...prev, revealRoleOnDeath: e.target.checked }
+                                : prev,
+                            )
+                          }
+                        />
+                        Reveal role when a player is eliminated/killed
+                      </label>
+
+                      <button
+                        className="rounded-xl bg-white/10 px-4 py-2 text-sm font-semibold text-white ring-1 ring-white/15 transition hover:bg-white/15"
+                        onClick={handleSaveSettings}
+                        type="button"
+                      >
+                        Save settings
+                      </button>
+        </div>
+                  </details>
+                )}
+
+                {isMaster ? (
+                  <button
+                    className="w-full rounded-2xl bg-violet-500 px-4 py-3 text-base font-semibold text-white shadow-lg shadow-violet-500/20 transition hover:bg-violet-400 disabled:cursor-not-allowed disabled:opacity-50"
+                    onClick={handleStartGame}
+                    disabled={totalCount < MIN_PLAYERS_TO_START}
+                    type="button"
+                  >
+                    Start game
+                  </button>
+                ) : (
+                  <p className="text-sm text-white/70">
+                    Waiting for the master device to start the game…
+                  </p>
+                )}
               </div>
             )}
-            {isMaster && (
-              <button
-                className="mt-4 rounded-xl bg-violet-500 px-4 py-2 font-semibold text-white shadow-lg shadow-violet-500/20 transition hover:bg-violet-400 disabled:cursor-not-allowed disabled:opacity-50"
-                onClick={handleStartGame}
-                disabled={gameState.players.length < MIN_PLAYERS_TO_START}
-              >
-                Start Game
-              </button>
-            )}
-          </section>
-        )}
 
-        {gameState.phase === "NIGHT" && (
-          <section className="rounded-3xl bg-white/10 p-6 shadow-2xl ring-1 ring-white/10 backdrop-blur">
-            <h2 className="text-lg font-semibold">Night {gameState.currentNight}</h2>
-            <p className="mt-2 text-sm text-white/80">
-              If you have an action, select a target and submit.
-            </p>
-            {playerRole && playerRole !== "VILLAGER" && (
-              <div className="mt-4 space-y-3">
+            {gameState.phase === "NIGHT" && (
+              <div className="space-y-4">
+                {playerRole && playerRole !== "VILLAGER" ? (
+                  <>
+                    <p className="text-sm text-white/80">
+                      Choose a target and submit your action.
+                    </p>
+                    <select
+                      className="w-full rounded-2xl border border-white/10 bg-white/10 px-4 py-3 text-white outline-none focus:ring-2 focus:ring-cyan-300/70"
+                      value={selectedTarget}
+                      onChange={(event) => setSelectedTarget(event.target.value)}
+                    >
+                      <option value="">Select target</option>
+                      {alivePlayers.map((player) => (
+                        <option key={player.id} value={player.id}>
+                          {player.name}
+                        </option>
+                      ))}
+                    </select>
+                    <button
+                      className="w-full rounded-2xl bg-white/10 px-4 py-3 text-base font-semibold text-white ring-1 ring-white/15 transition hover:bg-white/15 disabled:cursor-not-allowed disabled:opacity-50"
+                      onClick={handleSubmitAction}
+                      disabled={!selectedTarget}
+                      type="button"
+                    >
+                      Submit{" "}
+                      {playerRole === "MAFIA"
+                        ? "kill"
+                        : playerRole === "DOCTOR"
+                          ? "save"
+                          : "inspect"}
+                    </button>
+                  </>
+                ) : (
+                  (() => {
+                    const ritual = pickRitual(gameState.currentNight, client.playerId);
+                    const ritualDone = ritualSubmittedNight === gameState.currentNight;
+                    return (
+                      <div className="space-y-4">
+                        <p className="text-sm text-white/85">{ritual.prompt}</p>
+                        <div className="grid gap-2">
+                          {ritual.choices.map((choice) => (
+                            <button
+                              key={choice}
+                              type="button"
+                              className={`w-full rounded-2xl px-4 py-3 text-left text-sm font-semibold ring-1 transition ${
+                                ritualChoice === choice
+                                  ? "bg-cyan-400/20 text-cyan-100 ring-cyan-300/30"
+                                  : "bg-white/10 text-white ring-white/15 hover:bg-white/15"
+                              }`}
+                              onClick={() => setRitualChoice(choice)}
+                              disabled={ritualDone}
+                            >
+                              {choice}
+                            </button>
+                          ))}
+                        </div>
+                        <button
+                          className="w-full rounded-2xl bg-white/10 px-4 py-3 text-base font-semibold text-white ring-1 ring-white/15 transition hover:bg-white/15 disabled:cursor-not-allowed disabled:opacity-50"
+                          onClick={handleSubmitRitual}
+                          disabled={ritualDone}
+                          type="button"
+                        >
+                          {ritualDone ? "Ritual complete" : "Confirm ritual"}
+                        </button>
+                        <p className="text-xs text-white/60">
+                          This does not affect the game — it’s just camouflage so everyone taps.
+                        </p>
+    </div>
+  );
+                  })()
+                )}
+              </div>
+            )}
+
+            {gameState.phase === "DAY" && (
+              <div className="space-y-4">
+                <div className="rounded-2xl bg-white/5 p-4 ring-1 ring-white/10">
+                  <p className="text-sm font-semibold text-white">Overnight</p>
+                  <p className="mt-1 text-sm text-white/80">
+                    {gameState.lastResolution?.killedPlayerId
+                      ? `Eliminated: ${
+                          gameState.players.find(
+                            (p) => p.id === gameState.lastResolution?.killedPlayerId,
+                          )?.name ?? "Unknown"
+                        }${
+                          gameState.lastResolution?.killedRole
+                            ? ` (${gameState.lastResolution.killedRole})`
+                            : ""
+                        }`
+                      : "No one was eliminated."}
+                  </p>
+                </div>
+                {isMaster && (
+                  <button
+                    className="w-full rounded-2xl bg-amber-400 px-4 py-3 text-base font-semibold text-black shadow-lg shadow-amber-400/20 transition hover:bg-amber-300"
+                    onClick={handleStartVoting}
+                    type="button"
+                  >
+                    Start voting
+                  </button>
+                )}
+              </div>
+            )}
+
+            {gameState.phase === "VOTING" && (
+              <div className="space-y-4">
+                <p className="text-sm text-white/80">Cast your vote (secret).</p>
                 <select
-                  className="w-full rounded-xl border border-white/10 bg-white/10 px-4 py-2 text-white outline-none focus:ring-2 focus:ring-violet-400/70"
-                  value={selectedTarget}
-                  onChange={(event) => setSelectedTarget(event.target.value)}
+                  className="w-full rounded-2xl border border-white/10 bg-white/10 px-4 py-3 text-white outline-none focus:ring-2 focus:ring-amber-300/70"
+                  value={voteTarget}
+                  onChange={(event) => setVoteTarget(event.target.value)}
                 >
-                  <option value="">Select target</option>
+                  <option value="">Select player</option>
                   {alivePlayers.map((player) => (
                     <option key={player.id} value={player.id}>
                       {player.name}
@@ -1094,170 +1572,162 @@ export default function Home() {
                   ))}
                 </select>
                 <button
-                  className="rounded-xl bg-white/10 px-4 py-2 font-semibold text-white ring-1 ring-white/15 transition hover:bg-white/15 disabled:cursor-not-allowed disabled:opacity-50"
-                  onClick={handleSubmitAction}
-                  disabled={!selectedTarget}
+                  className="w-full rounded-2xl bg-amber-400 px-4 py-3 text-base font-semibold text-black shadow-lg shadow-amber-400/20 transition hover:bg-amber-300 disabled:cursor-not-allowed disabled:opacity-50"
+                  onClick={handleSubmitVote}
+                  disabled={!voteTarget}
+                  type="button"
                 >
-                  Submit{" "}
-                  {playerRole === "MAFIA"
-                    ? "kill"
-                    : playerRole === "DOCTOR"
-                      ? "save"
-                      : "inspect"}
+                  Submit vote
                 </button>
               </div>
             )}
-          </section>
-        )}
 
-        {gameState.phase === "DAY" && (
-          <section className="rounded-3xl bg-white/10 p-6 shadow-2xl ring-1 ring-white/10 backdrop-blur">
-            <h2 className="text-lg font-semibold">Day discussion</h2>
-            <p className="mt-2 text-sm text-white/80">
-              Discuss offline. When ready, the master device starts voting.
-            </p>
-            {gameState.lastResolution?.killedPlayerId ? (
-              <p className="mt-3 text-sm text-white/90">
-                Eliminated overnight:{" "}
-                {
-                  gameState.players.find(
-                    (player) => player.id === gameState.lastResolution?.killedPlayerId,
-                  )?.name
-                }
-              </p>
-            ) : (
-              <p className="mt-3 text-sm text-white/90">No one was eliminated.</p>
-            )}
-            {isMaster && (
-              <button
-                className="mt-4 rounded-xl bg-amber-400 px-4 py-2 font-semibold text-black shadow-lg shadow-amber-400/20 transition hover:bg-amber-300"
-                onClick={handleStartVoting}
-              >
-                Start Voting
-              </button>
-            )}
-          </section>
-        )}
-
-        {gameState.phase === "VOTING" && (
-          <section className="rounded-3xl bg-white/10 p-6 shadow-2xl ring-1 ring-white/10 backdrop-blur">
-            <h2 className="text-lg font-semibold">Voting</h2>
-            <p className="mt-2 text-sm text-white/80">
-              Vote for a player to eliminate. Votes are secret.
-            </p>
-            <div className="mt-4 space-y-3">
-              <select
-                className="w-full rounded-xl border border-white/10 bg-white/10 px-4 py-2 text-white outline-none focus:ring-2 focus:ring-amber-300/70"
-                value={voteTarget}
-                onChange={(event) => setVoteTarget(event.target.value)}
-              >
-                <option value="">Select player</option>
-                {alivePlayers.map((player) => (
-                  <option key={player.id} value={player.id}>
-                    {player.name}
-                  </option>
-                ))}
-              </select>
-              <button
-                className="rounded-xl bg-amber-400 px-4 py-2 font-semibold text-black shadow-lg shadow-amber-400/20 transition hover:bg-amber-300 disabled:cursor-not-allowed disabled:opacity-50"
-                onClick={handleSubmitVote}
-                disabled={!voteTarget}
-              >
-                Submit Vote
-              </button>
-            </div>
-          </section>
-        )}
-
-        {gameState.phase === "RESOLUTION" && (
-          <section className="rounded-3xl bg-white/10 p-6 shadow-2xl ring-1 ring-white/10 backdrop-blur">
-            <h2 className="text-lg font-semibold">Resolution</h2>
-            {gameState.lastVoteResult?.tie ? (
-              <p className="mt-2 text-sm text-white/80">
-                Voting resulted in a tie. No one is eliminated.
-              </p>
-            ) : (
-              <p className="mt-2 text-sm text-white/80">
-                Eliminated:{" "}
-                {
-                  gameState.players.find(
-                    (player) =>
-                      player.id === gameState.lastVoteResult?.eliminatedPlayerId,
-                  )?.name
-                }
-              </p>
-            )}
-            {isMaster && (
-              <button
-                className="mt-4 rounded-xl bg-violet-500 px-4 py-2 font-semibold text-white shadow-lg shadow-violet-500/20 transition hover:bg-violet-400"
-                onClick={handleStartNight}
-              >
-                Start Next Night
-              </button>
-            )}
-          </section>
-        )}
-
-        {gameState.phase === "GAME_OVER" && (
-          <section className="rounded-3xl bg-white/10 p-6 shadow-2xl ring-1 ring-white/10 backdrop-blur">
-            <h2 className="text-lg font-semibold">Game Over</h2>
-            <p className="mt-2 text-sm text-white/80">
-              The game has ended. Start a new game to play again.
-            </p>
-            {gameState.winner && (
-              <p className="mt-2 text-sm text-white/90">
-                Winner: {gameState.winner === "MAFIA" ? "Mafia" : "Villagers"}
-              </p>
-            )}
-            {isMaster && (
-              <button
-                className="mt-4 w-full rounded-xl bg-violet-500 px-4 py-2 font-semibold text-white shadow-lg shadow-violet-500/20 transition hover:bg-violet-400 sm:w-auto"
-                onClick={handleRestartWithSamePlayers}
-              >
-                Restart with same players
-              </button>
-            )}
-            <button className="mt-4 text-sm underline text-white/80" onClick={resetLocal}>
-              Leave game
-            </button>
-          </section>
-        )}
-
-        {inspectionResults.length > 0 && (
-          <section className="rounded-3xl bg-white/10 p-6 shadow-2xl ring-1 ring-white/10 backdrop-blur">
-            <h2 className="text-lg font-semibold">Detective Notes</h2>
-            <div className="mt-3 space-y-2 text-sm text-white/80">
-              {inspectionResults.map((result, index) => {
-                if (result.type !== "INSPECTION_RESULT") {
-                  return null;
-                }
-                const target = gameState.players.find(
-                  (player) => player.id === result.payload.targetPlayerId,
-                );
-                return (
-                  <p key={`${result.payload.targetPlayerId}-${index}`}>
-                    Night {result.payload.nightNumber}: {target?.name ?? "Unknown"} is{" "}
-                    {result.payload.targetRole}.
+            {gameState.phase === "RESOLUTION" && (
+              <div className="space-y-4">
+                <div className="rounded-2xl bg-white/5 p-4 ring-1 ring-white/10">
+                  <p className="text-sm font-semibold text-white">Vote result</p>
+                  <p className="mt-1 text-sm text-white/80">
+                    {gameState.lastVoteResult?.tie
+                      ? "Tie — no one is eliminated."
+                      : `Eliminated: ${
+                          gameState.players.find(
+                            (p) => p.id === gameState.lastVoteResult?.eliminatedPlayerId,
+                          )?.name ?? "Unknown"
+                        }${
+                          gameState.lastVoteResult?.eliminatedRole
+                            ? ` (${gameState.lastVoteResult.eliminatedRole})`
+                            : ""
+                        }`}
                   </p>
-                );
-              })}
-            </div>
-          </section>
-        )}
+                </div>
+                {isMaster && (
+                  <button
+                    className="w-full rounded-2xl bg-violet-500 px-4 py-3 text-base font-semibold text-white shadow-lg shadow-violet-500/20 transition hover:bg-violet-400"
+                    onClick={handleStartNight}
+                    type="button"
+                  >
+                    Start next night
+                  </button>
+                )}
+              </div>
+            )}
 
-        {isStale && !isMaster && (
-          <section className="rounded-3xl bg-white/10 p-6 shadow-2xl ring-1 ring-white/10 backdrop-blur">
-            <h2 className="text-lg font-semibold">Master device inactive</h2>
-            <p className="mt-2 text-sm text-white/80">
-              No updates received recently. You can take over to keep the game running.
-            </p>
+            {gameState.phase === "GAME_OVER" && (
+              <div className="space-y-4">
+                {gameState.winner && (
+                  <div className="rounded-2xl bg-white/5 p-4 ring-1 ring-white/10">
+                    <p className="text-sm font-semibold text-white">Winner</p>
+                    <p className="mt-1 text-2xl font-semibold">
+                      {gameState.winner === "MAFIA" ? "Mafia" : "Villagers"}
+                    </p>
+                  </div>
+                )}
+                {gameState.revealedRoles && (
+                  <div className="rounded-2xl bg-white/5 p-4 ring-1 ring-white/10">
+                    <p className="text-sm font-semibold text-white">Role reveal</p>
+                    <div className="mt-3 grid gap-2">
+                      {gameState.players.map((player) => (
+                        <div
+                          key={player.id}
+                          className="flex items-center justify-between rounded-xl bg-white/5 px-3 py-2 ring-1 ring-white/10"
+                        >
+                          <span className="text-sm font-medium">{player.name}</span>
+                          <span className="text-sm font-semibold text-white/90">
+                            {gameState.revealedRoles?.[player.id] ?? "Unknown"}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                {isMaster && (
+                  <button
+                    className="w-full rounded-2xl bg-violet-500 px-4 py-3 text-base font-semibold text-white shadow-lg shadow-violet-500/20 transition hover:bg-violet-400"
+                    onClick={handleRestartWithSamePlayers}
+                    type="button"
+                  >
+                    Restart with same players
+                  </button>
+                )}
+                <button
+                  className="w-full rounded-2xl bg-white/10 px-4 py-3 text-base font-semibold text-white ring-1 ring-white/15 transition hover:bg-white/15"
+                  onClick={resetLocal}
+                  type="button"
+                >
+                  Leave game
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Bottom drawer: players + detective notes */}
+        <div className="fixed inset-x-0 bottom-0 z-20 px-4 pb-4">
+          <div className="mx-auto w-full max-w-xl">
             <button
-              className="mt-4 rounded-xl bg-white/10 px-4 py-2 font-semibold text-white ring-1 ring-white/15 transition hover:bg-white/15"
-              onClick={handleTakeOver}
+              type="button"
+              className="w-full rounded-2xl bg-white/10 px-4 py-3 text-left text-sm font-semibold text-white shadow-2xl ring-1 ring-white/10 backdrop-blur"
+              onClick={() => setPlayersDrawerOpen((v) => !v)}
             >
-              Become Master
+              Players ({aliveCount}/{totalCount} alive)
+              <span className="float-right text-white/70">
+                {playersDrawerOpen ? "Hide" : "Show"}
+              </span>
             </button>
-          </section>
+
+            {playersDrawerOpen && (
+              <div className="mt-3 max-h-[55vh] overflow-auto rounded-3xl bg-black/40 p-4 shadow-2xl ring-1 ring-white/10 backdrop-blur">
+                <div className="grid gap-2 sm:grid-cols-2">
+                  {gameState.players.map((player) => (
+                    <div
+                      key={player.id}
+                      className={`rounded-2xl border px-4 py-3 ${
+                        player.alive
+                          ? "border-white/10 bg-white/5"
+                          : "border-red-400/30 bg-red-500/10"
+                      }`}
+                    >
+                      <p className="font-medium">{player.name}</p>
+                      <p className={`text-xs ${player.alive ? "text-white/60" : "text-red-200"}`}>
+                        {player.alive ? "Alive" : "Eliminated"}
+                      </p>
+                    </div>
+                  ))}
+                </div>
+
+                {inspectionResults.length > 0 && (
+                  <div className="mt-4 rounded-2xl bg-white/5 p-4 ring-1 ring-white/10">
+                    <p className="text-sm font-semibold">Detective notes</p>
+                    <div className="mt-2 space-y-1 text-sm text-white/80">
+                      {inspectionResults.map((result, index) => {
+                        if (result.type !== "INSPECTION_RESULT") {
+                          return null;
+                        }
+                        const target = gameState.players.find(
+                          (player) => player.id === result.payload.targetPlayerId,
+                        );
+                        return (
+                          <p key={`${result.payload.targetPlayerId}-${index}`}>
+                            Night {result.payload.nightNumber}: {target?.name ?? "Unknown"} is{" "}
+                            {result.payload.targetRole}.
+                          </p>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Toast */}
+        {statusMessage && (
+          <div className="fixed left-0 right-0 top-3 z-30 px-4">
+            <div className="mx-auto w-full max-w-xl rounded-2xl bg-black/60 px-4 py-3 text-sm text-white shadow-2xl ring-1 ring-white/10 backdrop-blur">
+              {statusMessage}
+            </div>
+          </div>
         )}
       </div>
     </div>

@@ -26,3 +26,34 @@ body {
     BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, "Apple Color Emoji",
     "Segoe UI Emoji";
 }
+
+.bg-stars {
+  background-image: radial-gradient(rgba(255, 255, 255, 0.9) 1px, transparent 1px),
+    radial-gradient(rgba(167, 139, 250, 0.6) 1px, transparent 1px),
+    radial-gradient(rgba(56, 189, 248, 0.35) 1px, transparent 1px);
+  background-size: 120px 120px, 180px 180px, 260px 260px;
+  background-position: 0 0, 40px 60px, 120px 140px;
+  mask-image: radial-gradient(closest-side, rgba(0, 0, 0, 0.9), transparent 85%);
+}
+
+.flip-card {
+  perspective: 1200px;
+}
+
+.flip-inner {
+  transform-style: preserve-3d;
+  transition: transform 650ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+.flip-flipped .flip-inner {
+  transform: rotateY(180deg);
+}
+
+.flip-face {
+  backface-visibility: hidden;
+  -webkit-backface-visibility: hidden;
+}
+
+.flip-back {
+  transform: rotateY(180deg);
+}

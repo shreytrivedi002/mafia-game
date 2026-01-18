@@ -26,6 +26,7 @@ export function createInitialState(
       daySeconds: 120,
       votingSeconds: 60,
       autoAdvance: true,
+      revealRoleOnDeath: false,
     },
     masterPlayerId,
     version: 1,

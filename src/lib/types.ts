@@ -16,6 +16,7 @@ export type GameSettings = {
   daySeconds: number;
   votingSeconds: number;
   autoAdvance: boolean;
+  revealRoleOnDeath: boolean;
 };
 
 export type Player = {
@@ -41,12 +42,15 @@ export type GameState = {
   lastResolution?: {
     killedPlayerId?: string;
     savedPlayerId?: string;
+    killedRole?: Role;
   };
   lastVoteResult?: {
     eliminatedPlayerId?: string;
     tie: boolean;
+    eliminatedRole?: Role;
   };
   winner?: "VILLAGERS" | "MAFIA";
+  revealedRoles?: Record<string, Role>;
   createdAt: number;
   updatedAt: number;
 };
@@ -86,6 +90,18 @@ export type RelayEvent =
       id: string;
       createdAt: number;
       payload: Action;
+    }
+  | {
+      type: "RITUAL";
+      id: string;
+      createdAt: number;
+      payload: {
+        gameId: string;
+        nightNumber: number;
+        playerId: string;
+        promptId: string;
+        choice: string;
+      };
     }
   | {
       type: "VOTE";
