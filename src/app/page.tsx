@@ -631,7 +631,7 @@ export default function Home() {
         joinedAt: event.createdAt,
         lastSeenAt: event.createdAt,
       };
-      const next = {
+      const next: GameState = {
         ...gameState,
         phase: "LOBBY",
         players: [...gameState.players, newPlayer],
@@ -778,7 +778,7 @@ export default function Home() {
 
     masterCacheRef.current.nightActions.delete(gameState.currentNight);
     masterCacheRef.current.nightRituals.delete(gameState.currentNight);
-    const next = {
+    const next: GameState = {
       ...gameState,
       players: result.updatedPlayers,
       phase: "DAY",
@@ -810,7 +810,7 @@ export default function Home() {
       gameState.settings.revealRoleOnDeath && result.eliminatedPlayerId
         ? roleMap[result.eliminatedPlayerId]
         : undefined;
-    const next = {
+    const next: GameState = {
       ...gameState,
       players: result.updatedPlayers,
       phase: winner ? "GAME_OVER" : "RESOLUTION",
@@ -956,7 +956,7 @@ export default function Home() {
     }
     const phaseId = `VOTE-${gameState.currentNight}-${Date.now()}`;
     masterCacheRef.current.votes.clear();
-    const next = {
+    const next: GameState = {
       ...gameState,
       phase: "VOTING",
       phaseId,
@@ -976,7 +976,7 @@ export default function Home() {
     masterCacheRef.current.nightActions.clear();
     masterCacheRef.current.nightRituals.clear();
     masterCacheRef.current.votes.clear();
-    const next = {
+    const next: GameState = {
       ...gameState,
       phase: "NIGHT",
       currentNight: gameState.currentNight + 1,
