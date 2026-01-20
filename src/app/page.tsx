@@ -633,7 +633,6 @@ export default function Home() {
       };
       const next: GameState = {
         ...gameState,
-        phase: "LOBBY",
         players: [...gameState.players, newPlayer],
         version: gameState.version + 1,
       };
