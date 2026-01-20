@@ -17,15 +17,12 @@ export const metadata: Metadata = {
   description: "Hostless offline Mafia game manager for in-person play.",
   applicationName: "Offline Mafia",
   manifest: "/manifest.webmanifest",
+  themeColor: "#6D28D9",
   appleWebApp: {
     capable: true,
     statusBarStyle: "black-translucent",
     title: "Mafia",
   },
-};
-
-export const viewport = {
-  themeColor: "#6D28D9",
 };
 
 export default function RootLayout({
