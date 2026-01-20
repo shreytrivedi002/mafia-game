@@ -1296,6 +1296,13 @@ export default function Home() {
                   {remainingSeconds === null ? "—" : formatSeconds(remainingSeconds)}
                 </p>
               </div>
+              <button
+                type="button"
+                onClick={resetLocal}
+                className="text-[11px] font-medium text-white/70 underline underline-offset-2"
+              >
+                Exit game
+              </button>
               {isStale && !isMaster && (
                 <button
                   className="rounded-xl bg-white/10 px-3 py-2 text-xs font-semibold text-white ring-1 ring-white/15 transition hover:bg-white/15"
