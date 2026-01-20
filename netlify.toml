@@ -1,0 +1,8 @@
+[build]
+  command = "yarn build"
+  publish = ".next"
+  # Optional but recommended if Netlify mis-detects root:
+  base = "."
+
+[[plugins]]
+  package = "@netlify/plugin-nextjs"
