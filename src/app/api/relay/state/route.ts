@@ -9,7 +9,7 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: "gameId required" }, { status: 400 });
   }
 
-  const state = getState(gameId);
+  const state = await getState(gameId);
   if (!state) {
     return NextResponse.json({ error: "not_found" }, { status: 404 });
   }
@@ -23,7 +23,10 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "gameId and state required" }, { status: 400 });
   }
 
-  const current = getState(body.gameId);
+  /* eslint-disable @typescript-eslint/no-unused-vars */
+  const current = await getState(body.gameId);
+  /* eslint-enable @typescript-eslint/no-unused-vars */
+
   if (current && body.state.version <= current.version) {
     return NextResponse.json({ state: current, ignored: true }, { status: 200 });
   }
@@ -32,7 +35,7 @@ export async function POST(request: Request) {
     ...body.state,
     updatedAt: Date.now(),
   };
-  setState(body.gameId, nextState);
+  await setState(body.gameId, nextState);
 
   return NextResponse.json({ state: nextState });
 }

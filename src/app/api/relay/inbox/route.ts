@@ -12,7 +12,10 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: "gameId, playerId, token required" }, { status: 400 });
   }
 
-  const messages = pullInboxMessages(gameId, playerId, token);
+  /* eslint-disable @typescript-eslint/no-unused-vars */
+  const messages = await pullInboxMessages(gameId, playerId, token);
+  /* eslint-enable @typescript-eslint/no-unused-vars */
+
   if (!messages) {
     return NextResponse.json({ error: "unauthorized" }, { status: 403 });
   }
@@ -30,7 +33,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "gameId, playerId, message required" }, { status: 400 });
   }
 
-  const pushed = pushInboxMessage(body.gameId, body.playerId, body.message);
+  const pushed = await pushInboxMessage(body.gameId, body.playerId, body.message);
   if (!pushed) {
     return NextResponse.json({ error: "player_not_registered" }, { status: 404 });
   }

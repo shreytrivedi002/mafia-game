@@ -10,7 +10,7 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: "gameId required" }, { status: 400 });
   }
 
-  const events = getEvents(gameId, Number.isNaN(after) ? 0 : after);
+  const events = await getEvents(gameId, Number.isNaN(after) ? 0 : after);
   return NextResponse.json({ events });
 }
 
@@ -20,7 +20,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "gameId and event required" }, { status: 400 });
   }
 
-  const index = addEvent(body.gameId, body.event);
+  const index = await addEvent(body.gameId, body.event);
   if (index === null) {
     return NextResponse.json({ duplicated: true }, { status: 200 });
   }
