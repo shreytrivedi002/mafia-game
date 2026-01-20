@@ -12,6 +12,7 @@ import type {
   SecretMessage,
   Vote,
 } from "@/lib/types";
+import QRCode from "react-qr-code";
 import {
   ACTIVE_POLL_INTERVAL_MS,
   MASTER_STALE_MS,
@@ -255,22 +256,22 @@ const NIGHT_RITUALS: Array<{
   prompt: string;
   choices: string[];
 }> = [
-  {
-    id: "FINGERPRINT",
-    prompt: "Night ritual: pick a totally useless fingerprint.",
-    choices: ["Left thumb", "Right thumb", "Pinky", "No comment"],
-  },
-  {
-    id: "VIBE_CHECK",
-    prompt: "Night ritual: choose your vibe (does not affect the game).",
-    choices: ["Innocent", "Sneaky", "Confused", "Chaos"],
-  },
-  {
-    id: "MOON_OATH",
-    prompt: "Night ritual: swear an oath to the moon.",
-    choices: ["I swear", "I double swear", "I pinky swear", "I refuse (still ok)"],
-  },
-];
+    {
+      id: "FINGERPRINT",
+      prompt: "Night ritual: pick a totally useless fingerprint.",
+      choices: ["Left thumb", "Right thumb", "Pinky", "No comment"],
+    },
+    {
+      id: "VIBE_CHECK",
+      prompt: "Night ritual: choose your vibe (does not affect the game).",
+      choices: ["Innocent", "Sneaky", "Confused", "Chaos"],
+    },
+    {
+      id: "MOON_OATH",
+      prompt: "Night ritual: swear an oath to the moon.",
+      choices: ["I swear", "I double swear", "I pinky swear", "I refuse (still ok)"],
+    },
+  ];
 
 function pickRitual(nightNumber: number, playerId: string) {
   const raw = `${nightNumber}:${playerId}`;
@@ -398,6 +399,7 @@ export default function Home() {
   const [playersDrawerOpen, setPlayersDrawerOpen] = useState(false);
   const [ritualChoice, setRitualChoice] = useState<string>("");
   const [ritualSubmittedNight, setRitualSubmittedNight] = useState<number | null>(null);
+  const [joinUrl, setJoinUrl] = useState("");
 
   const masterCacheRef = useRef<MasterCache>(initialMasterCache);
   const autoTakeoverAttemptVersionRef = useRef<number | null>(null);
@@ -429,8 +431,21 @@ export default function Home() {
       if (cached?.id === storedGameId) {
         setGameState(cached);
       }
+    } else {
+      // Check for join code in URL
+      const searchParams = new URLSearchParams(window.location.search);
+      const codeParam = searchParams.get("code");
+      if (codeParam) {
+        setJoinCode(codeParam.toUpperCase());
+      }
     }
   }, []);
+
+  useEffect(() => {
+    if (gameState?.id && typeof window !== "undefined") {
+      setJoinUrl(`${window.location.origin}/?code=${gameState.id}`);
+    }
+  }, [gameState?.id]);
 
   useEffect(() => {
     if (!client?.gameId) {
@@ -1155,7 +1170,7 @@ export default function Home() {
   };
 
   if (!client) {
-  return (
+    return (
       <div className="min-h-screen bg-gradient-to-br from-violet-950 via-slate-950 to-black px-6 py-10 text-white">
         <div className="mx-auto w-full max-w-xl space-y-6 rounded-3xl bg-white/10 p-6 shadow-2xl ring-1 ring-white/10 backdrop-blur">
           <div className="flex items-center justify-between">
@@ -1287,11 +1302,10 @@ export default function Home() {
                   Time left
                 </p>
                 <p
-                  className={`text-xl font-semibold ${
-                    remainingSeconds !== null && remainingSeconds <= 10
+                  className={`text-xl font-semibold ${remainingSeconds !== null && remainingSeconds <= 10
                       ? "text-amber-200"
                       : "text-white"
-                  }`}
+                    }`}
                 >
                   {remainingSeconds === null ? "—" : formatSeconds(remainingSeconds)}
                 </p>
@@ -1337,6 +1351,15 @@ export default function Home() {
                     Tip: everyone can keep this open; the game is resumable.
                   </p>
                 </div>
+
+                {joinUrl && (
+                  <div className="flex flex-col items-center justify-center space-y-2 rounded-2xl bg-white p-4">
+                    <QRCode value={joinUrl} size={160} />
+                    <p className="text-xs font-semibold uppercase tracking-wider text-black">
+                      Scan to Join
+                    </p>
+                  </div>
+                )}
 
                 {isMaster && settingsDraft && (
                   <details className="rounded-2xl border border-white/10 bg-white/5 p-4">
@@ -1391,9 +1414,9 @@ export default function Home() {
                               setSettingsDraft((prev) =>
                                 prev
                                   ? {
-                                      ...prev,
-                                      votingSeconds: Number(e.target.value),
-                                    }
+                                    ...prev,
+                                    votingSeconds: Number(e.target.value),
+                                  }
                                   : prev,
                               )
                             }
@@ -1436,7 +1459,7 @@ export default function Home() {
                       >
                         Save settings
                       </button>
-        </div>
+                    </div>
                   </details>
                 )}
 
@@ -1502,11 +1525,10 @@ export default function Home() {
                             <button
                               key={choice}
                               type="button"
-                              className={`w-full rounded-2xl px-4 py-3 text-left text-sm font-semibold ring-1 transition ${
-                                ritualChoice === choice
+                              className={`w-full rounded-2xl px-4 py-3 text-left text-sm font-semibold ring-1 transition ${ritualChoice === choice
                                   ? "bg-cyan-400/20 text-cyan-100 ring-cyan-300/30"
                                   : "bg-white/10 text-white ring-white/15 hover:bg-white/15"
-                              }`}
+                                }`}
                               onClick={() => setRitualChoice(choice)}
                               disabled={ritualDone}
                             >
@@ -1525,8 +1547,8 @@ export default function Home() {
                         <p className="text-xs text-white/60">
                           This does not affect the game — it’s just camouflage so everyone taps.
                         </p>
-    </div>
-  );
+                      </div>
+                    );
                   })()
                 )}
               </div>
@@ -1538,15 +1560,13 @@ export default function Home() {
                   <p className="text-sm font-semibold text-white">Overnight</p>
                   <p className="mt-1 text-sm text-white/80">
                     {gameState.lastResolution?.killedPlayerId
-                      ? `Eliminated: ${
-                          gameState.players.find(
-                            (p) => p.id === gameState.lastResolution?.killedPlayerId,
-                          )?.name ?? "Unknown"
-                        }${
-                          gameState.lastResolution?.killedRole
-                            ? ` (${gameState.lastResolution.killedRole})`
-                            : ""
-                        }`
+                      ? `Eliminated: ${gameState.players.find(
+                        (p) => p.id === gameState.lastResolution?.killedPlayerId,
+                      )?.name ?? "Unknown"
+                      }${gameState.lastResolution?.killedRole
+                        ? ` (${gameState.lastResolution.killedRole})`
+                        : ""
+                      }`
                       : "No one was eliminated."}
                   </p>
                 </div>
@@ -1595,15 +1615,13 @@ export default function Home() {
                   <p className="mt-1 text-sm text-white/80">
                     {gameState.lastVoteResult?.tie
                       ? "Tie — no one is eliminated."
-                      : `Eliminated: ${
-                          gameState.players.find(
-                            (p) => p.id === gameState.lastVoteResult?.eliminatedPlayerId,
-                          )?.name ?? "Unknown"
-                        }${
-                          gameState.lastVoteResult?.eliminatedRole
-                            ? ` (${gameState.lastVoteResult.eliminatedRole})`
-                            : ""
-                        }`}
+                      : `Eliminated: ${gameState.players.find(
+                        (p) => p.id === gameState.lastVoteResult?.eliminatedPlayerId,
+                      )?.name ?? "Unknown"
+                      }${gameState.lastVoteResult?.eliminatedRole
+                        ? ` (${gameState.lastVoteResult.eliminatedRole})`
+                        : ""
+                      }`}
                   </p>
                 </div>
                 {isMaster && (
@@ -1687,11 +1705,10 @@ export default function Home() {
                   {gameState.players.map((player) => (
                     <div
                       key={player.id}
-                      className={`rounded-2xl border px-4 py-3 ${
-                        player.alive
+                      className={`rounded-2xl border px-4 py-3 ${player.alive
                           ? "border-white/10 bg-white/5"
                           : "border-red-400/30 bg-red-500/10"
-                      }`}
+                        }`}
                     >
                       <p className="font-medium">{player.name}</p>
                       <p className={`text-xs ${player.alive ? "text-white/60" : "text-red-200"}`}>
