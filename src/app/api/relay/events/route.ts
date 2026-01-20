@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import type { RelayEvent, RelayEventWithIndex } from "@/lib/types";
+import type { RelayEvent } from "@/lib/types";
 import { addEvent, getEvents } from "@/lib/relayStore";
 
 export async function GET(request: Request) {
