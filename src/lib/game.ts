@@ -36,19 +36,65 @@ export function createInitialState(
   };
 }
 
+function calculateMafiaCount(totalPlayers: number): number {
+  // Mafia game balance rules:
+  // 4-6 players: 1 Mafia
+  // 7-9 players: 2 Mafia
+  // 10-12 players: 2 Mafia
+  // 13-15 players: 3 Mafia
+  // 16-18 players: 3 Mafia
+  // 19-21 players: 4 Mafia
+  // 22+ players: ~1 Mafia per 5-6 players
+  if (totalPlayers <= 6) {
+    return 1;
+  } else if (totalPlayers <= 9) {
+    return 2;
+  } else if (totalPlayers <= 12) {
+    return 2;
+  } else if (totalPlayers <= 15) {
+    return 3;
+  } else if (totalPlayers <= 18) {
+    return 3;
+  } else if (totalPlayers <= 21) {
+    return 4;
+  } else {
+    // For very large games, roughly 1 Mafia per 5-6 players
+    return Math.max(4, Math.floor(totalPlayers / 5.5));
+  }
+}
+
 export function assignRoles(players: Player[]): Player[] {
+  if (players.length < 4) {
+    throw new Error("At least 4 players required");
+  }
+
   const shuffled = [...players].sort(() => Math.random() - 0.5);
+  const mafiaCount = calculateMafiaCount(players.length);
+  
+  // Build roles array: multiple MAFIA, one DOCTOR, one DETECTIVE, rest are VILLAGERS
   const roles: Role[] = [
-    "MAFIA",
+    ...Array(mafiaCount).fill("MAFIA"),
     "DOCTOR",
     "DETECTIVE",
-    ...Array(Math.max(shuffled.length - 3, 0)).fill("VILLAGER"),
+    ...Array(Math.max(shuffled.length - mafiaCount - 2, 0)).fill("VILLAGER"),
   ];
 
-  return shuffled.map((player, index) => ({
+  // Shuffle roles again to randomize which players get which roles
+  const shuffledRoles = [...roles].sort(() => Math.random() - 0.5);
+
+  const assigned = shuffled.map((player, index) => ({
     ...player,
-    role: roles[index] ?? "VILLAGER",
+    role: shuffledRoles[index] ?? "VILLAGER",
   }));
+
+  // Safety check: ensure at least one MAFIA was assigned
+  const finalMafiaCount = assigned.filter((p) => p.role === "MAFIA").length;
+  if (finalMafiaCount === 0) {
+    // Fallback: assign first player as MAFIA if somehow none was assigned
+    assigned[0]!.role = "MAFIA";
+  }
+
+  return assigned;
 }
 
 export function getAlivePlayers(players: Player[]): Player[] {

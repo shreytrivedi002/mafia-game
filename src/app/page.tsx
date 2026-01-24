@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import QRCode from "react-qr-code";
 import type {
   Action,
   GameState,
@@ -67,7 +68,8 @@ function formatSeconds(totalSeconds: number): string {
   return `${minutes}:${String(seconds).padStart(2, "0")}`;
 }
 
-function getPhaseDurationSeconds(phase: GameState["phase"], settings: GameSettings): number | null {
+function getPhaseDurationSeconds(phase: GameState["phase"], settings: GameSettings | undefined): number | null {
+  if (!settings) return null;
   if (phase === "NIGHT") return settings.nightSeconds;
   if (phase === "DAY") return settings.daySeconds;
   if (phase === "VOTING") return settings.votingSeconds;
@@ -401,6 +403,7 @@ export default function Home() {
   const [showInstallPrompt, setShowInstallPrompt] = useState(false);
   const [deferredPrompt, setDeferredPrompt] = useState<BeforeInstallPromptEvent | null>(null);
   const [isIOS, setIsIOS] = useState(false);
+  const [showQRScanner, setShowQRScanner] = useState(false);
 
   const masterCacheRef = useRef<MasterCache>(initialMasterCache);
   const installPromptRef = useRef<BeforeInstallPromptEvent | null>(null);
@@ -459,26 +462,19 @@ export default function Home() {
       e.preventDefault();
       installPromptRef.current = e as BeforeInstallPromptEvent;
       setDeferredPrompt(e as BeforeInstallPromptEvent);
+      // Show prompt immediately when beforeinstallprompt fires
       setShowInstallPrompt(true);
     };
 
     window.addEventListener("beforeinstallprompt", handleBeforeInstallPrompt);
 
-    // For iOS or if no beforeinstallprompt fires, show manual instructions
-    if (isIOSDevice || !installPromptRef.current) {
-      // Small delay to check if beforeinstallprompt fires
-      const timeout = setTimeout(() => {
-        if (!installPromptRef.current) {
-          setShowInstallPrompt(true);
-        }
-      }, 1000);
-      return () => {
-        clearTimeout(timeout);
-        window.removeEventListener("beforeinstallprompt", handleBeforeInstallPrompt);
-      };
-    }
+    // Always show prompt after a short delay (for iOS or if beforeinstallprompt doesn't fire)
+    const timeout = setTimeout(() => {
+      setShowInstallPrompt(true);
+    }, 1500);
 
     return () => {
+      clearTimeout(timeout);
       window.removeEventListener("beforeinstallprompt", handleBeforeInstallPrompt);
     };
   }, []);
@@ -634,7 +630,7 @@ export default function Home() {
   }, [client, gameState, isMaster, lastStateAt]);
 
   useEffect(() => {
-    if (!client || !gameState || !isMaster || !gameState.settings.autoAdvance) {
+    if (!client || !gameState || !isMaster || !gameState.settings?.autoAdvance) {
       return;
     }
 
@@ -810,7 +806,7 @@ export default function Home() {
       actions,
     );
     const killedRole =
-      gameState.settings.revealRoleOnDeath && result.killedPlayerId
+      gameState.settings?.revealRoleOnDeath && result.killedPlayerId
         ? roleMap[result.killedPlayerId]
         : undefined;
 
@@ -857,7 +853,7 @@ export default function Home() {
     const winner = checkWin(result.updatedPlayers);
     const revealedRoles = winner ? roleMap : undefined;
     const eliminatedRole =
-      gameState.settings.revealRoleOnDeath && result.eliminatedPlayerId
+      gameState.settings?.revealRoleOnDeath && result.eliminatedPlayerId
         ? roleMap[result.eliminatedPlayerId]
         : undefined;
     const next: GameState = {
@@ -1288,12 +1284,62 @@ export default function Home() {
                 placeholder="Game code"
               />
               <button
+                type="button"
+                className="rounded-xl bg-white/10 px-3 py-2 font-medium text-white ring-1 ring-white/15 transition hover:bg-white/15"
+                onClick={() => setShowQRScanner(true)}
+                title="Scan QR code"
+              >
+                📷
+              </button>
+              <button
                 className="rounded-xl bg-white/10 px-4 py-2 font-medium text-white ring-1 ring-white/15 transition hover:bg-white/15"
                 onClick={handleJoinGame}
               >
                 Join
               </button>
             </div>
+            {showQRScanner && (
+              <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4">
+                <div className="w-full max-w-md rounded-2xl bg-white/10 p-6 shadow-2xl ring-1 ring-white/10 backdrop-blur">
+                  <div className="mb-4 flex items-center justify-between">
+                    <p className="text-lg font-semibold text-white">Scan QR Code</p>
+                    <button
+                      type="button"
+                      onClick={() => setShowQRScanner(false)}
+                      className="rounded-xl bg-white/10 px-3 py-2 text-sm font-semibold text-white ring-1 ring-white/15 transition hover:bg-white/15"
+                    >
+                      ✕
+                    </button>
+                  </div>
+                  <div className="space-y-3">
+                    <p className="text-sm text-white/80">
+                      Use your device camera to scan the game code QR code, or enter it manually
+                      below.
+                    </p>
+                    <input
+                      type="text"
+                      className="w-full rounded-xl border border-white/10 bg-white/10 px-4 py-2 text-white placeholder:text-white/40 outline-none focus:ring-2 focus:ring-violet-400/70"
+                      value={joinCode}
+                      onChange={(event) => setJoinCode(event.target.value.toUpperCase())}
+                      placeholder="Or type game code here"
+                      autoFocus
+                    />
+                    <button
+                      type="button"
+                      className="w-full rounded-xl bg-violet-500 px-4 py-2 font-semibold text-white shadow-lg shadow-violet-500/20 transition hover:bg-violet-400"
+                      onClick={() => {
+                        if (joinCode.trim()) {
+                          handleJoinGame();
+                          setShowQRScanner(false);
+                        }
+                      }}
+                    >
+                      Join Game
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
           {statusMessage && <p className="text-sm text-white/80">{statusMessage}</p>}
         </div>
@@ -1317,7 +1363,7 @@ export default function Home() {
 
   const duration = getPhaseDurationSeconds(gameState.phase, gameState.settings);
   const remainingSeconds =
-    duration === null ? null : duration - (Date.now() - gameState.phaseStartedAt) / 1000;
+    duration === null ? null : duration - (Date.now() - (gameState.phaseStartedAt ?? Date.now())) / 1000;
   const isStale = lastStateAt ? Date.now() - lastStateAt > MASTER_STALE_MS : false;
   const scene = phaseToScene(gameState.phase, gameState.currentNight);
   const aliveCount = alivePlayers.length;
@@ -1464,6 +1510,19 @@ export default function Home() {
                   <p className="text-xs text-white/60">
                     Tip: everyone can keep this open; the game is resumable.
                   </p>
+                </div>
+
+                <div className="flex flex-col items-center gap-3 rounded-2xl bg-white/5 p-4 ring-1 ring-white/10">
+                  <p className="text-sm font-semibold text-white">Scan to join</p>
+                  <div className="rounded-xl bg-white p-3">
+                    <QRCode
+                      value={gameState.id}
+                      size={180}
+                      level="M"
+                      style={{ height: "auto", maxWidth: "100%", width: "100%" }}
+                    />
+                  </div>
+                  <p className="text-xs text-white/70">Game code: {gameState.id}</p>
                 </div>
 
                 {isMaster && settingsDraft && (
