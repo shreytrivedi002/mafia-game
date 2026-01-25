@@ -14,6 +14,20 @@ function requestId(): string {
   return (globalThis.crypto as any)?.randomUUID?.() ?? Math.random().toString(36).slice(2);
 }
 
+function mergePlayers(
+  current: GameState["players"] | undefined,
+  incoming: GameState["players"] | undefined,
+): GameState["players"] {
+  const byId = new Map<string, GameState["players"][number]>();
+  for (const p of current ?? []) {
+    byId.set(p.id, p);
+  }
+  for (const p of incoming ?? []) {
+    byId.set(p.id, p); // incoming wins for same id
+  }
+  return [...byId.values()];
+}
+
 export async function GET(request: Request) {
   try {
     const { searchParams } = new URL(request.url);
@@ -105,9 +119,16 @@ export async function POST(request: Request) {
       return NextResponse.json({ state: current, ignored: true }, { status: 200 });
     }
 
-    const nextState = {
+    const now = Date.now();
+    const nextState: GameState = {
       ...body.state,
-      updatedAt: Date.now(),
+      // Never allow a publish to "drop" players that already joined.
+      players: current ? mergePlayers(current.players, body.state.players) : body.state.players,
+      // If settings are missing for any reason, preserve existing.
+      settings: (body.state as any).settings ?? (current as any)?.settings,
+      // Preserve phaseStartedAt if missing.
+      phaseStartedAt: (body.state as any).phaseStartedAt ?? (current as any)?.phaseStartedAt ?? now,
+      updatedAt: now,
     };
     await setState(body.gameId, nextState);
 
