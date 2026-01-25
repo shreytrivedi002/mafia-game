@@ -33,6 +33,49 @@ type InboxDoc = {
   updatedAt: number;
 };
 
+async function ensureInboxFromJoinEvent(
+  gameId: string,
+  playerId: string,
+): Promise<{ token: string } | null> {
+  const client = await clientPromise;
+  const db = client.db(DB_NAME);
+
+  const join = await db
+    .collection<RelayEventDoc>(COLLECTIONS.events)
+    .find({
+      gameId,
+      "event.type": "JOIN",
+      "event.payload.playerId": playerId,
+    })
+    .sort({ createdAt: -1 })
+    .limit(1)
+    .toArray();
+
+  const latest = join[0]?.event;
+  if (!latest || latest.type !== "JOIN") {
+    return null;
+  }
+
+  const token = latest.payload.token;
+  await db.collection<InboxDoc>(COLLECTIONS.inbox).updateOne(
+    { _id: `${gameId}:${playerId}` },
+    {
+      $set: {
+        gameId,
+        playerId,
+        token,
+        updatedAt: Date.now(),
+      },
+      $setOnInsert: {
+        messages: [],
+      },
+    },
+    { upsert: true },
+  );
+
+  return { token };
+}
+
 export async function getState(gameId: string): Promise<GameState | undefined> {
   const client = await clientPromise;
   const db = client.db(DB_NAME);
@@ -71,24 +114,18 @@ export async function addEvent(gameId: string, event: RelayEvent): Promise<numbe
     return null;
   }
 
-  // Get or create game doc and atomically increment event index
-  const gameDoc = await db.collection<RelayGameDoc>(COLLECTIONS.games).findOne({ _id: gameId });
-  let index: number;
-  if (!gameDoc) {
-    index = 1;
-    await db.collection<RelayGameDoc>(COLLECTIONS.games).insertOne({
-      _id: gameId,
-      nextEventIndex: 2,
-      updatedAt: Date.now(),
-    });
-  } else {
-    const result = await db.collection<RelayGameDoc>(COLLECTIONS.games).findOneAndUpdate(
-      { _id: gameId },
-      { $inc: { nextEventIndex: 1 }, $set: { updatedAt: Date.now() } },
-      { returnDocument: "after" },
-    );
-    index = result?.nextEventIndex ?? gameDoc.nextEventIndex;
-  }
+  // Atomically allocate the next event index (use pre-increment value).
+  // If the game doc doesn't exist yet, index starts at 1.
+  const before = await db.collection<RelayGameDoc>(COLLECTIONS.games).findOneAndUpdate(
+    { _id: gameId },
+    {
+      $inc: { nextEventIndex: 1 },
+      $set: { updatedAt: Date.now() },
+      $setOnInsert: { nextEventIndex: 1 },
+    },
+    { upsert: true, returnDocument: "before" },
+  );
+  const index = before?.nextEventIndex ?? 1;
 
   await db.collection<RelayEventDoc>(COLLECTIONS.events).insertOne({
     _id: eventKey,
@@ -142,7 +179,24 @@ export async function pushInboxMessage(
 ): Promise<boolean> {
   const client = await clientPromise;
   const db = client.db(DB_NAME);
-  const result = await db.collection<InboxDoc>(COLLECTIONS.inbox).updateOne(
+  let result = await db.collection<InboxDoc>(COLLECTIONS.inbox).updateOne(
+    { _id: `${gameId}:${playerId}` },
+    {
+      $push: { messages: message },
+      $set: { updatedAt: Date.now() },
+    },
+  );
+  if (result.matchedCount > 0) {
+    return true;
+  }
+
+  // If inbox wasn't registered (serverless race), attempt to recover from JOIN event.
+  const recovered = await ensureInboxFromJoinEvent(gameId, playerId);
+  if (!recovered) {
+    return false;
+  }
+
+  result = await db.collection<InboxDoc>(COLLECTIONS.inbox).updateOne(
     { _id: `${gameId}:${playerId}` },
     {
       $push: { messages: message },
@@ -159,9 +213,15 @@ export async function pullInboxMessages(
 ): Promise<SecretMessage[] | null> {
   const client = await clientPromise;
   const db = client.db(DB_NAME);
-  const doc = await db.collection<InboxDoc>(COLLECTIONS.inbox).findOne({
+  let doc = await db.collection<InboxDoc>(COLLECTIONS.inbox).findOne({
     _id: `${gameId}:${playerId}`,
   });
+  if (!doc) {
+    await ensureInboxFromJoinEvent(gameId, playerId);
+    doc = await db.collection<InboxDoc>(COLLECTIONS.inbox).findOne({
+      _id: `${gameId}:${playerId}`,
+    });
+  }
   if (!doc || doc.token !== token) {
     return null;
   }
