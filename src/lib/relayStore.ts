@@ -107,13 +107,6 @@ export async function addEvent(gameId: string, event: RelayEvent): Promise<numbe
   const db = client.db(DB_NAME);
 
   const eventKey = `${gameId}:${event.id}`;
-  const existing = await db.collection<RelayEventDoc>(COLLECTIONS.events).findOne({
-    _id: eventKey,
-  });
-  if (existing) {
-    return null;
-  }
-
   // Atomically allocate the next event index (use pre-increment value).
   // If the game doc doesn't exist yet, index starts at 1.
   const before = await db.collection<RelayGameDoc>(COLLECTIONS.games).findOneAndUpdate(
@@ -127,14 +120,22 @@ export async function addEvent(gameId: string, event: RelayEvent): Promise<numbe
   );
   const index = before?.nextEventIndex ?? 1;
 
-  await db.collection<RelayEventDoc>(COLLECTIONS.events).insertOne({
-    _id: eventKey,
-    gameId,
-    eventId: event.id,
-    event,
-    index,
-    createdAt: Date.now(),
-  });
+  try {
+    await db.collection<RelayEventDoc>(COLLECTIONS.events).insertOne({
+      _id: eventKey,
+      gameId,
+      eventId: event.id,
+      event,
+      index,
+      createdAt: Date.now(),
+    });
+  } catch (error: any) {
+    // Duplicate key means we've already processed this event (idempotency).
+    if (typeof error?.message === "string" && error.message.includes("E11000")) {
+      return null;
+    }
+    throw error;
+  }
 
   if (event.type === "JOIN") {
     const { playerId, token } = event.payload;

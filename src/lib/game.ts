@@ -119,11 +119,29 @@ export function resolveNightActions(
   }>;
 } {
   const alivePlayers = getAlivePlayers(state.players);
-  const mafiaAction = actions.find((action) => action.type === "KILL");
+  const mafiaActions = actions.filter((action) => action.type === "KILL");
   const doctorAction = actions.find((action) => action.type === "SAVE");
   const detectiveActions = actions.filter((action) => action.type === "INSPECT");
 
-  const killTargetId = mafiaAction?.targetPlayerId;
+  // Multiple Mafia: majority vote on kill target. Tie => no kill.
+  const killVotes = new Map<string, number>();
+  for (const action of mafiaActions) {
+    if (!action.targetPlayerId) {
+      continue;
+    }
+    killVotes.set(action.targetPlayerId, (killVotes.get(action.targetPlayerId) ?? 0) + 1);
+  }
+
+  let killTargetId: string | undefined;
+  if (killVotes.size > 0) {
+    let max = 0;
+    for (const count of killVotes.values()) {
+      max = Math.max(max, count);
+    }
+    const top = [...killVotes.entries()].filter(([, c]) => c === max).map(([id]) => id);
+    killTargetId = top.length === 1 ? top[0] : undefined;
+  }
+
   const savedPlayerId = doctorAction?.targetPlayerId;
   const killTarget = killTargetId
     ? state.players.find((player) => player.id === killTargetId)

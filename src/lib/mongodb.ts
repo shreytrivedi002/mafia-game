@@ -7,22 +7,22 @@ if (!process.env.MONGODB_URI) {
 const uri = process.env.MONGODB_URI;
 const options = {};
 
-let client: MongoClient;
-let clientPromise: Promise<MongoClient>;
-
-if (process.env.NODE_ENV === "development") {
-  let globalWithMongo = global as typeof globalThis & {
-    _mongoClientPromise?: Promise<MongoClient>;
-  };
-
-  if (!globalWithMongo._mongoClientPromise) {
-    client = new MongoClient(uri, options);
-    globalWithMongo._mongoClientPromise = client.connect();
-  }
-  clientPromise = globalWithMongo._mongoClientPromise;
-} else {
-  client = new MongoClient(uri, options);
-  clientPromise = client.connect();
+declare global {
+  // eslint-disable-next-line no-var
+  var _mongoClientPromise: Promise<MongoClient> | undefined;
 }
+
+const globalWithMongo = globalThis as typeof globalThis & {
+  _mongoClientPromise?: Promise<MongoClient>;
+};
+
+// In serverless environments (Netlify), you still want to reuse the client within a warm lambda.
+// Always cache the promise on the global to avoid creating too many connections.
+if (!globalWithMongo._mongoClientPromise) {
+  const client = new MongoClient(uri, options);
+  globalWithMongo._mongoClientPromise = client.connect();
+}
+
+const clientPromise = globalWithMongo._mongoClientPromise;
 
 export default clientPromise;
