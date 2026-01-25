@@ -445,6 +445,16 @@ export default function Home() {
   }, []);
 
   useEffect(() => {
+    // Deep link support: /?join=ABC123 should prefill the join code.
+    const params = new URLSearchParams(window.location.search);
+    const join = params.get("join") || params.get("gameId");
+    if (join) {
+      setJoinCode(join.toUpperCase());
+      setShowQRScanner(true);
+    }
+  }, []);
+
+  useEffect(() => {
     // Check if already installed
     const isStandalone =
       window.matchMedia("(display-mode: standalone)").matches ||
@@ -1515,8 +1525,12 @@ export default function Home() {
                 <div className="flex flex-col items-center gap-3 rounded-2xl bg-white/5 p-4 ring-1 ring-white/10">
                   <p className="text-sm font-semibold text-white">Scan to join</p>
                   <div className="rounded-xl bg-white p-3">
+                    {/*
+                      Encode a URL (not just the raw code) so phone camera scanners open the app.
+                      The app will parse ?join=... and prefill the join code.
+                    */}
                     <QRCode
-                      value={gameState.id}
+                      value={`${window.location.origin}/?join=${encodeURIComponent(gameState.id)}`}
                       size={180}
                       level="M"
                       style={{ height: "auto", maxWidth: "100%", width: "100%" }}
