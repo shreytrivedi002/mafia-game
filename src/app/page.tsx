@@ -3,26 +3,11 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import QRCode from "react-qr-code";
 import type {
-  Action,
   GameState,
   GameSettings,
-  Player,
-  RelayEvent,
-  RelayEventWithIndex,
   Role,
   SecretMessage,
-  Vote,
 } from "@/lib/types";
-import {
-  ACTIVE_POLL_INTERVAL_MS,
-  MASTER_STALE_MS,
-  assignRoles,
-  checkWin,
-  createInitialState,
-  generateId,
-  resolveNightActions,
-  resolveVotes,
-} from "@/lib/game";
 
 const STORAGE_KEYS = {
   gameId: "mafia_game_id",
@@ -30,8 +15,6 @@ const STORAGE_KEYS = {
   playerName: "mafia_player_name",
   playerToken: "mafia_player_token",
   playerRole: "mafia_player_role",
-  localState: "mafia_local_state",
-  masterRoles: "mafia_master_roles",
 };
 
 type ClientInfo = {
@@ -41,20 +24,7 @@ type ClientInfo = {
   playerToken: string;
 };
 
-type MasterCache = {
-  eventCursor: number;
-  nightActions: Map<number, Action[]>;
-  nightRituals: Map<number, Map<string, { promptId: string; choice: string }>>;
-  votes: Map<string, Vote[]>;
-};
-
-const initialMasterCache: MasterCache = {
-  eventCursor: 0,
-  nightActions: new Map(),
-  nightRituals: new Map(),
-  votes: new Map(),
-};
-
+const POLL_INTERVAL_MS = 2000;
 const MIN_PLAYERS_TO_START = 4;
 
 function clampNumber(value: number, min: number, max: number): number {
@@ -68,7 +38,10 @@ function formatSeconds(totalSeconds: number): string {
   return `${minutes}:${String(seconds).padStart(2, "0")}`;
 }
 
-function getPhaseDurationSeconds(phase: GameState["phase"], settings: GameSettings | undefined): number | null {
+function getPhaseDurationSeconds(
+  phase: GameState["phase"],
+  settings: GameSettings | undefined
+): number | null {
   if (!settings) return null;
   if (phase === "NIGHT") return settings.nightSeconds;
   if (phase === "DAY") return settings.daySeconds;
@@ -88,12 +61,7 @@ function phaseToScene(phase: GameState["phase"], nightNumber: number): PhaseScen
   const baseIconClass = "h-10 w-10";
 
   const moonIcon = (
-    <svg
-      className={baseIconClass}
-      viewBox="0 0 24 24"
-      fill="none"
-      aria-hidden="true"
-    >
+    <svg className={baseIconClass} viewBox="0 0 24 24" fill="none" aria-hidden="true">
       <path
         d="M21 14.6A8.6 8.6 0 1 1 9.4 3a7.2 7.2 0 0 0 11.6 11.6Z"
         stroke="currentColor"
@@ -121,12 +89,7 @@ function phaseToScene(phase: GameState["phase"], nightNumber: number): PhaseScen
 
   const voteIcon = (
     <svg className={baseIconClass} viewBox="0 0 24 24" fill="none" aria-hidden="true">
-      <path
-        d="M7 11h10M7 15h6"
-        stroke="currentColor"
-        strokeWidth="1.8"
-        strokeLinecap="round"
-      />
+      <path d="M7 11h10M7 15h6" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
       <path
         d="M7.5 3h9A2.5 2.5 0 0 1 19 5.5v13A2.5 2.5 0 0 1 16.5 21h-9A2.5 2.5 0 0 1 5 18.5v-13A2.5 2.5 0 0 1 7.5 3Z"
         stroke="currentColor"
@@ -144,18 +107,8 @@ function phaseToScene(phase: GameState["phase"], nightNumber: number): PhaseScen
 
   const resolveIcon = (
     <svg className={baseIconClass} viewBox="0 0 24 24" fill="none" aria-hidden="true">
-      <path
-        d="M12 3v18"
-        stroke="currentColor"
-        strokeWidth="1.8"
-        strokeLinecap="round"
-      />
-      <path
-        d="M6 7h12"
-        stroke="currentColor"
-        strokeWidth="1.8"
-        strokeLinecap="round"
-      />
+      <path d="M12 3v18" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+      <path d="M6 7h12" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
       <path
         d="M7.5 7 5 12.5a3 3 0 0 0 6 0L8.5 7"
         stroke="currentColor"
@@ -173,17 +126,8 @@ function phaseToScene(phase: GameState["phase"], nightNumber: number): PhaseScen
 
   const gameOverIcon = (
     <svg className={baseIconClass} viewBox="0 0 24 24" fill="none" aria-hidden="true">
-      <path
-        d="M8 21h8M12 17v4"
-        stroke="currentColor"
-        strokeWidth="1.8"
-        strokeLinecap="round"
-      />
-      <path
-        d="M7 3h10v4a5 5 0 0 1-10 0V3Z"
-        stroke="currentColor"
-        strokeWidth="1.8"
-      />
+      <path d="M8 21h8M12 17v4" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+      <path d="M7 3h10v4a5 5 0 0 1-10 0V3Z" stroke="currentColor" strokeWidth="1.8" />
       <path
         d="M7 5H4v2a3 3 0 0 0 3 3M17 5h3v2a3 3 0 0 1-3 3"
         stroke="currentColor"
@@ -196,7 +140,7 @@ function phaseToScene(phase: GameState["phase"], nightNumber: number): PhaseScen
   if (phase === "LOBBY") {
     return {
       title: "Lobby",
-      subtitle: "Gather players. Master configures timers and starts the game.",
+      subtitle: "Gather players. Configure settings and start the game.",
       accent: "violet",
       bgClass: "bg-gradient-to-b from-violet-950 via-slate-950 to-black",
       icon: moonIcon,
@@ -252,11 +196,7 @@ function phaseToScene(phase: GameState["phase"], nightNumber: number): PhaseScen
   };
 }
 
-const NIGHT_RITUALS: Array<{
-  id: string;
-  prompt: string;
-  choices: string[];
-}> = [
+const NIGHT_RITUALS: Array<{ id: string; prompt: string; choices: string[] }> = [
   {
     id: "FINGERPRINT",
     prompt: "Night ritual: pick a totally useless fingerprint.",
@@ -283,119 +223,172 @@ function pickRitual(nightNumber: number, playerId: string) {
   return NIGHT_RITUALS[hash % NIGHT_RITUALS.length];
 }
 
-async function relayGetState(gameId: string): Promise<GameState | null> {
-  const res = await fetch(`/api/relay/state?gameId=${gameId}`, { cache: "no-store" });
-  if (!res.ok) {
-    return null;
-  }
-  const data = (await res.json()) as { state: GameState };
-  return data.state;
-}
+// ============ API CALLS ============
 
-async function relaySetState(
-  gameId: string,
-  state: GameState,
-  actor: { playerId: string; token: string },
-): Promise<GameState | null> {
-  const res = await fetch("/api/relay/state", {
+async function apiCreateGame(playerName: string) {
+  const res = await fetch("/api/game", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ gameId, state, actor }),
+    body: JSON.stringify({ playerName }),
   });
   if (!res.ok) {
-    return null;
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.error || "Failed to create game");
   }
-  const data = (await res.json()) as { state: GameState };
-  return data.state;
+  return res.json() as Promise<{
+    gameId: string;
+    playerId: string;
+    token: string;
+    state: GameState;
+  }>;
 }
 
-async function relayClaimMaster(gameId: string, playerId: string, token: string) {
-  const res = await fetch("/api/relay/master", {
+async function apiJoinGame(gameId: string, playerName: string) {
+  const res = await fetch("/api/game/join", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ gameId, playerName }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.error || "Failed to join game");
+  }
+  return res.json() as Promise<{
+    gameId: string;
+    playerId: string;
+    token: string;
+    state: GameState;
+  }>;
+}
+
+async function apiGetState(gameId: string, playerId?: string) {
+  const url = playerId
+    ? `/api/game/state?gameId=${gameId}&playerId=${playerId}`
+    : `/api/game/state?gameId=${gameId}`;
+  const res = await fetch(url, { cache: "no-store" });
+  if (!res.ok) return null;
+  const data = await res.json();
+  return data.state as GameState;
+}
+
+async function apiStartGame(gameId: string, playerId: string, token: string) {
+  const res = await fetch("/api/game/start", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ gameId, playerId, token }),
   });
-  return res.ok ? ((await res.json()) as { state: GameState }) : null;
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.error || "Failed to start game");
+  }
+  return res.json() as Promise<{ state: GameState }>;
 }
 
-async function relaySendEvent(gameId: string, event: RelayEvent) {
-  await fetch("/api/relay/events", {
+async function apiSubmitAction(
+  gameId: string,
+  playerId: string,
+  token: string,
+  actionType: string,
+  targetPlayerId: string
+) {
+  const res = await fetch("/api/game/action", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ gameId, event }),
-  });
-}
-
-async function relayFetchEvents(gameId: string, after: number) {
-  const res = await fetch(`/api/relay/events?gameId=${gameId}&after=${after}`, {
-    cache: "no-store",
+    body: JSON.stringify({ gameId, playerId, token, actionType, targetPlayerId }),
   });
   if (!res.ok) {
-    return [] as RelayEventWithIndex[];
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.error || "Failed to submit action");
   }
-  const data = (await res.json()) as { events: RelayEventWithIndex[] };
-  return data.events;
+  return res.json();
 }
 
-async function relaySendSecret(gameId: string, playerId: string, message: SecretMessage) {
-  await fetch("/api/relay/inbox", {
+async function apiSubmitRitual(gameId: string, playerId: string, token: string) {
+  const res = await fetch("/api/game/ritual", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ gameId, playerId, message }),
+    body: JSON.stringify({ gameId, playerId, token }),
   });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.error || "Failed to submit ritual");
+  }
+  return res.json();
 }
 
-async function relayPullInbox(gameId: string, playerId: string, token: string) {
+async function apiSubmitVote(
+  gameId: string,
+  playerId: string,
+  token: string,
+  targetPlayerId: string
+) {
+  const res = await fetch("/api/game/vote", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ gameId, playerId, token, targetPlayerId }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.error || "Failed to submit vote");
+  }
+  return res.json();
+}
+
+async function apiUpdateSettings(
+  gameId: string,
+  playerId: string,
+  token: string,
+  settings: Partial<GameSettings>
+) {
+  const res = await fetch("/api/game/settings", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ gameId, playerId, token, settings }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.error || "Failed to update settings");
+  }
+  return res.json() as Promise<{ state: GameState }>;
+}
+
+async function apiAdvancePhase(gameId: string, playerId: string, token: string) {
+  const res = await fetch("/api/game/advance", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ gameId, playerId, token }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.error || "Failed to advance phase");
+  }
+  return res.json() as Promise<{ state: GameState }>;
+}
+
+async function apiRestartGame(gameId: string, playerId: string, token: string) {
+  const res = await fetch("/api/game/restart", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ gameId, playerId, token }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.error || "Failed to restart game");
+  }
+  return res.json() as Promise<{ state: GameState }>;
+}
+
+async function apiGetInbox(gameId: string, playerId: string, token: string) {
   const res = await fetch(
-    `/api/relay/inbox?gameId=${gameId}&playerId=${playerId}&token=${token}`,
-    { cache: "no-store" },
+    `/api/game/inbox?gameId=${gameId}&playerId=${playerId}&token=${token}`,
+    { cache: "no-store" }
   );
-  if (!res.ok) {
-    return [] as SecretMessage[];
-  }
-  const data = (await res.json()) as { messages: SecretMessage[] };
-  return data.messages;
+  if (!res.ok) return [];
+  const data = await res.json();
+  return (data.messages || []) as SecretMessage[];
 }
 
-function storeLocalState(state: GameState) {
-  localStorage.setItem(STORAGE_KEYS.localState, JSON.stringify(state));
-}
-
-function loadLocalState(): GameState | null {
-  const raw = localStorage.getItem(STORAGE_KEYS.localState);
-  if (!raw) {
-    return null;
-  }
-  try {
-    return JSON.parse(raw) as GameState;
-  } catch {
-    return null;
-  }
-}
-
-function saveMasterRoles(roleMap: Record<string, Role>) {
-  localStorage.setItem(STORAGE_KEYS.masterRoles, JSON.stringify(roleMap));
-}
-
-function loadMasterRoles(): Record<string, Role> {
-  const raw = localStorage.getItem(STORAGE_KEYS.masterRoles);
-  if (!raw) {
-    return {};
-  }
-  try {
-    return JSON.parse(raw) as Record<string, Role>;
-  } catch {
-    return {};
-  }
-}
-
-function withRoles(players: Player[], roleMap: Record<string, Role>): Player[] {
-  return players.map((player) => ({ ...player, role: roleMap[player.id] }));
-}
-
-function stripRoles(players: Player[]): Player[] {
-  return players.map(({ role, ...rest }) => rest);
-}
+// ============ COMPONENT ============
 
 export default function Home() {
   const [client, setClient] = useState<ClientInfo | null>(null);
@@ -407,34 +400,30 @@ export default function Home() {
   const [selectedTarget, setSelectedTarget] = useState("");
   const [voteTarget, setVoteTarget] = useState("");
   const [inspectionResults, setInspectionResults] = useState<SecretMessage[]>([]);
-  const [lastStateAt, setLastStateAt] = useState<number | null>(null);
   const [settingsDraft, setSettingsDraft] = useState<GameSettings | null>(null);
   const [infoCardFlipped, setInfoCardFlipped] = useState(false);
   const [playersDrawerOpen, setPlayersDrawerOpen] = useState(false);
   const [ritualChoice, setRitualChoice] = useState<string>("");
   const [ritualSubmittedNight, setRitualSubmittedNight] = useState<number | null>(null);
+  const [actionSubmittedNight, setActionSubmittedNight] = useState<number | null>(null);
+  const [voteSubmittedPhase, setVoteSubmittedPhase] = useState<string | null>(null);
   const [showInstallPrompt, setShowInstallPrompt] = useState(false);
   const [deferredPrompt, setDeferredPrompt] = useState<BeforeInstallPromptEvent | null>(null);
   const [isIOS, setIsIOS] = useState(false);
   const [showQRScanner, setShowQRScanner] = useState(false);
-
-  const masterCacheRef = useRef<MasterCache>(initialMasterCache);
-  const installPromptRef = useRef<BeforeInstallPromptEvent | null>(null);
+  const [isLoading, setIsLoading] = useState(false);
 
   type BeforeInstallPromptEvent = Event & {
     prompt: () => Promise<void>;
     userChoice: Promise<{ outcome: "accepted" | "dismissed" }>;
   };
-  const autoTakeoverAttemptVersionRef = useRef<number | null>(null);
-  const isMaster = gameState && client ? gameState.masterPlayerId === client.playerId : false;
 
   const alivePlayers = useMemo(() => {
-    if (!gameState) {
-      return [];
-    }
-    return gameState.players.filter((player) => player.alive);
+    if (!gameState) return [];
+    return gameState.players.filter((p) => p.alive);
   }, [gameState]);
 
+  // Load from localStorage on mount
   useEffect(() => {
     const storedGameId = localStorage.getItem(STORAGE_KEYS.gameId);
     const storedPlayerId = localStorage.getItem(STORAGE_KEYS.playerId);
@@ -450,15 +439,11 @@ export default function Home() {
         playerToken: storedToken,
       });
       setPlayerRole(storedRole);
-      const cached = loadLocalState();
-      if (cached?.id === storedGameId) {
-        setGameState(cached);
-      }
     }
   }, []);
 
+  // Deep link support
   useEffect(() => {
-    // Deep link support: /?join=ABC123 should prefill the join code.
     const params = new URLSearchParams(window.location.search);
     const join = params.get("join") || params.get("gameId");
     if (join) {
@@ -467,8 +452,8 @@ export default function Home() {
     }
   }, []);
 
+  // PWA install prompt
   useEffect(() => {
-    // Check if already installed
     const isStandalone =
       window.matchMedia("(display-mode: standalone)").matches ||
       (window.navigator as { standalone?: boolean }).standalone === true;
@@ -480,18 +465,14 @@ export default function Home() {
       return;
     }
 
-    // Listen for beforeinstallprompt (Android/Chrome)
     const handleBeforeInstallPrompt = (e: Event) => {
       e.preventDefault();
-      installPromptRef.current = e as BeforeInstallPromptEvent;
       setDeferredPrompt(e as BeforeInstallPromptEvent);
-      // Show prompt immediately when beforeinstallprompt fires
       setShowInstallPrompt(true);
     };
 
     window.addEventListener("beforeinstallprompt", handleBeforeInstallPrompt);
 
-    // Always show prompt after a short delay (for iOS or if beforeinstallprompt doesn't fire)
     const timeout = setTimeout(() => {
       setShowInstallPrompt(true);
     }, 1500);
@@ -502,44 +483,35 @@ export default function Home() {
     };
   }, []);
 
+  // Poll for game state
   useEffect(() => {
-    if (!client?.gameId) {
-      return;
-    }
+    if (!client?.gameId) return;
 
-    let isActive = true;
+    let active = true;
     const poll = async () => {
-      const state = await relayGetState(client.gameId);
-      if (state && isActive) {
+      const state = await apiGetState(client.gameId, client.playerId);
+      if (state && active) {
         setGameState(state);
-        setLastStateAt(Date.now());
-        storeLocalState(state);
       }
     };
 
     poll();
-    const interval = window.setInterval(poll, ACTIVE_POLL_INTERVAL_MS);
+    const interval = window.setInterval(poll, POLL_INTERVAL_MS);
     return () => {
-      isActive = false;
+      active = false;
       window.clearInterval(interval);
     };
-  }, [client?.gameId]);
+  }, [client?.gameId, client?.playerId]);
 
+  // Poll inbox for role assignments and inspection results
   useEffect(() => {
-    if (!client) {
-      return;
-    }
+    if (!client) return;
 
     let active = true;
     const pollInbox = async () => {
-      const messages = await relayPullInbox(
-        client.gameId,
-        client.playerId,
-        client.playerToken,
-      );
-      if (!active || messages.length === 0) {
-        return;
-      }
+      const messages = await apiGetInbox(client.gameId, client.playerId, client.playerToken);
+      if (!active || messages.length === 0) return;
+
       for (const message of messages) {
         if (message.type === "ROLE_ASSIGNMENT") {
           setPlayerRole(message.payload.role);
@@ -551,10 +523,10 @@ export default function Home() {
           setInspectionResults([]);
           setSelectedTarget("");
           setVoteTarget("");
+          setActionSubmittedNight(null);
+          setRitualSubmittedNight(null);
+          setVoteSubmittedPhase(null);
           setStatusMessage("Game restarted. Waiting in lobby.");
-        }
-        if (message.type === "ACTION_REJECTED") {
-          setStatusMessage(message.payload.reason);
         }
         if (message.type === "INSPECTION_RESULT") {
           setInspectionResults((prev) => [...prev, message]);
@@ -563,359 +535,60 @@ export default function Home() {
     };
 
     pollInbox();
-    const interval = window.setInterval(pollInbox, ACTIVE_POLL_INTERVAL_MS);
+    const interval = window.setInterval(pollInbox, POLL_INTERVAL_MS);
     return () => {
       active = false;
       window.clearInterval(interval);
     };
   }, [client]);
 
+  // Auto-dismiss status messages
   useEffect(() => {
-    if (!statusMessage) {
-      return;
-    }
+    if (!statusMessage) return;
     const timeout = window.setTimeout(() => setStatusMessage(null), 3200);
     return () => window.clearTimeout(timeout);
   }, [statusMessage]);
 
+  // Initialize settings draft
   useEffect(() => {
-    if (!gameState) {
-      return;
-    }
+    if (!gameState) return;
     setSettingsDraft((prev) => prev ?? gameState.settings);
   }, [gameState?.id]);
 
+  // Reset UI state on phase change
   useEffect(() => {
     setInfoCardFlipped(false);
     setPlayersDrawerOpen(false);
     setRitualChoice("");
-    setRitualSubmittedNight(null);
   }, [gameState?.phase]);
 
-  useEffect(() => {
-    if (!client || !gameState || !isMaster) {
-      return;
-    }
-
-    let active = true;
-    const pollEvents = async () => {
-      const events = await relayFetchEvents(
-        client.gameId,
-        masterCacheRef.current.eventCursor,
-      );
-      if (!active || events.length === 0) {
-        return;
-      }
-      events.forEach((event) => {
-        masterCacheRef.current.eventCursor = Math.max(
-          masterCacheRef.current.eventCursor,
-          event.index,
-        );
-        handleEvent(event);
-      });
-    };
-
-    const interval = window.setInterval(pollEvents, ACTIVE_POLL_INTERVAL_MS);
-    pollEvents();
-    return () => {
-      active = false;
-      window.clearInterval(interval);
-    };
-  }, [client, gameState, isMaster]);
-
-  // Removed client-side auto takeover. Master changes must be server-authoritative
-  // to prevent split-brain (two devices becoming master).
-
-  useEffect(() => {
-    if (!client || !gameState || !isMaster || !gameState.settings?.autoAdvance) {
-      return;
-    }
-
-    const tick = () => {
-      const duration = getPhaseDurationSeconds(gameState.phase, gameState.settings);
-      if (!duration) {
-        return;
-      }
-      const elapsedSeconds = (Date.now() - gameState.phaseStartedAt) / 1000;
-      const remaining = duration - elapsedSeconds;
-      if (remaining > 0) {
-        return;
-      }
-
-      if (gameState.phase === "NIGHT") {
-        // Night should not auto-resolve just because the timer hit zero.
-        // It resolves when all required actions are submitted AND all non-action players confirm ritual.
-        attemptNightResolution(false);
-      } else if (gameState.phase === "DAY") {
-        handleStartVoting();
-      } else if (gameState.phase === "VOTING") {
-        attemptVoteResolution(true);
-      }
-    };
-
-    tick();
-    const interval = window.setInterval(tick, 1000);
-    return () => window.clearInterval(interval);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [client, gameState, isMaster]);
-
-  const handleEvent = (event: RelayEvent) => {
-    if (!gameState || !client) {
-      return;
-    }
-
-    if (event.type === "JOIN") {
-      if (gameState.players.some((player) => player.id === event.payload.playerId)) {
-        return;
-      }
-      const newPlayer: Player = {
-        id: event.payload.playerId,
-        name: event.payload.name,
-        alive: true,
-        joinedAt: event.createdAt,
-        lastSeenAt: event.createdAt,
-      };
-      const next: GameState = {
-        ...gameState,
-        players: [...gameState.players, newPlayer],
-        version: gameState.version + 1,
-      };
-      publishState(next);
-      return;
-    }
-
-    if (event.type === "ACTION") {
-      const action = event.payload;
-      if (gameState.phase !== "NIGHT") {
-        return;
-      }
-      if (!action.targetPlayerId) {
-        return;
-      }
-      const roleMap = loadMasterRoles();
-      const actorRole = roleMap[action.playerId];
-      const targetRole = roleMap[action.targetPlayerId];
-      if (action.type === "KILL" && actorRole === "MAFIA" && targetRole === "MAFIA") {
-        void relaySendSecret(gameState.id, action.playerId, {
-          type: "ACTION_REJECTED",
-          createdAt: Date.now(),
-          payload: { reason: "Invalid action: Mafia cannot kill another Mafia." },
-        });
-        return;
-      }
-      const actions = masterCacheRef.current.nightActions.get(action.nightNumber) ?? [];
-      const already = actions.some((existing) => existing.playerId === action.playerId);
-      if (!already) {
-        masterCacheRef.current.nightActions.set(action.nightNumber, [...actions, action]);
-      }
-      attemptNightResolution(false);
-      return;
-    }
-
-    if (event.type === "RITUAL") {
-      const ritual = event.payload;
-      if (gameState.phase !== "NIGHT" || ritual.nightNumber !== gameState.currentNight) {
-        return;
-      }
-      const rituals =
-        masterCacheRef.current.nightRituals.get(ritual.nightNumber) ?? new Map();
-      if (!rituals.has(ritual.playerId)) {
-        rituals.set(ritual.playerId, { promptId: ritual.promptId, choice: ritual.choice });
-        masterCacheRef.current.nightRituals.set(ritual.nightNumber, rituals);
-      }
-      attemptNightResolution(false);
-      return;
-    }
-
-    if (event.type === "VOTE") {
-      const vote = event.payload;
-      if (gameState.phase !== "VOTING" || !gameState.phaseId) {
-        return;
-      }
-      const votes = masterCacheRef.current.votes.get(vote.phaseId) ?? [];
-      const already = votes.some((existing) => existing.voterId === vote.voterId);
-      if (!already) {
-        masterCacheRef.current.votes.set(vote.phaseId, [...votes, vote]);
-      }
-      attemptVoteResolution(false);
-    }
-  };
-
-  const publishState = async (next: GameState) => {
-    const sanitizedPlayers = stripRoles(next.players);
-    const prepared = { ...next, players: sanitizedPlayers };
-    if (!client) {
-      return;
-    }
-    const updated = await relaySetState(next.id, prepared, {
-      playerId: client.playerId,
-      token: client.playerToken,
-    });
-    if (updated) {
-      setGameState(updated);
-      storeLocalState(updated);
-    }
-  };
-
-  const attemptNightResolution = async (force: boolean) => {
-    if (!gameState || !client) {
-      return;
-    }
-    const roleMap = loadMasterRoles();
-    const playersWithRoles = withRoles(gameState.players, roleMap);
-    const aliveWithRole = playersWithRoles.filter((player) => player.alive && player.role);
-    const requiredRoles = new Set(aliveWithRole.map((player) => player.role as Role));
-    const aliveActionPlayers = aliveWithRole.filter((player) =>
-      player.role === "MAFIA" || player.role === "DOCTOR" || player.role === "DETECTIVE",
-    );
-    const aliveRitualPlayers = playersWithRoles.filter(
-      (player) => player.alive && (!player.role || player.role === "VILLAGER"),
-    );
-
-    const actions = masterCacheRef.current.nightActions.get(gameState.currentNight) ?? [];
-    const hasMafia = requiredRoles.has("MAFIA");
-    const hasDoctor = requiredRoles.has("DOCTOR");
-    const hasDetective = requiredRoles.has("DETECTIVE");
-
-    const actionTypes = new Set(actions.map((action) => action.type));
-    if (!force && hasMafia && !actionTypes.has("KILL")) {
-      return;
-    }
-    if (!force && hasDoctor && !actionTypes.has("SAVE")) {
-      return;
-    }
-    if (!force && hasDetective && !actionTypes.has("INSPECT")) {
-      return;
-    }
-
-    if (!force) {
-      const rituals =
-        masterCacheRef.current.nightRituals.get(gameState.currentNight) ?? new Map();
-      const allRitualConfirmed = aliveRitualPlayers.every((player) => rituals.has(player.id));
-      if (!allRitualConfirmed) {
-        return;
-      }
-
-      const allActionSubmitted = aliveActionPlayers.every((player) =>
-        actions.some((action) => action.playerId === player.id),
-      );
-      if (!allActionSubmitted) {
-        return;
-      }
-    }
-
-    const result = resolveNightActions(
-      { ...gameState, players: playersWithRoles },
-      actions,
-    );
-    const killedRole =
-      gameState.settings?.revealRoleOnDeath && result.killedPlayerId
-        ? roleMap[result.killedPlayerId]
-        : undefined;
-
-    for (const inspection of result.inspectionResults) {
-      await relaySendSecret(gameState.id, inspection.detectiveId, {
-        type: "INSPECTION_RESULT",
-        createdAt: Date.now(),
-        payload: {
-          nightNumber: gameState.currentNight,
-          targetPlayerId: inspection.targetPlayerId,
-          targetRole: inspection.targetRole,
-        },
-      });
-    }
-
-    masterCacheRef.current.nightActions.delete(gameState.currentNight);
-    masterCacheRef.current.nightRituals.delete(gameState.currentNight);
-    const next: GameState = {
-      ...gameState,
-      players: result.updatedPlayers,
-      phase: "DAY",
-      phaseStartedAt: Date.now(),
-      lastResolution: {
-        killedPlayerId: result.killedPlayerId,
-        savedPlayerId: result.savedPlayerId,
-        killedRole,
-      },
-      version: gameState.version + 1,
-    };
-    publishState(next);
-  };
-
-  const attemptVoteResolution = (force: boolean) => {
-    if (!gameState || !gameState.phaseId) {
-      return;
-    }
-    const votes = masterCacheRef.current.votes.get(gameState.phaseId) ?? [];
-    if (!force && votes.length < alivePlayers.length) {
-      return;
-    }
-    const roleMap = loadMasterRoles();
-    const playersWithRoles = withRoles(gameState.players, roleMap);
-    const result = resolveVotes({ ...gameState, players: playersWithRoles }, votes);
-    const winner = checkWin(result.updatedPlayers);
-    const revealedRoles = winner ? roleMap : undefined;
-    const eliminatedRole =
-      gameState.settings?.revealRoleOnDeath && result.eliminatedPlayerId
-        ? roleMap[result.eliminatedPlayerId]
-        : undefined;
-    const next: GameState = {
-      ...gameState,
-      players: result.updatedPlayers,
-      phase: winner ? "GAME_OVER" : "RESOLUTION",
-      status: winner ? "COMPLETED" : gameState.status,
-      winner: winner ?? gameState.winner,
-      revealedRoles: revealedRoles ?? gameState.revealedRoles,
-      phaseStartedAt: Date.now(),
-      lastVoteResult: {
-        eliminatedPlayerId: result.eliminatedPlayerId,
-        tie: result.tie,
-        eliminatedRole,
-      },
-      version: gameState.version + 1,
-    };
-    masterCacheRef.current.votes.delete(gameState.phaseId);
-    publishState(next);
-  };
+  // ============ HANDLERS ============
 
   const handleCreateGame = async () => {
     if (!nickname.trim()) {
       setStatusMessage("Enter a nickname to create a game.");
       return;
     }
-    masterCacheRef.current = {
-      eventCursor: 0,
-      nightActions: new Map(),
-      nightRituals: new Map(),
-      votes: new Map(),
-    };
-    const gameId = generateId(6);
-    const playerId = generateId(8);
-    const playerToken = generateId(12);
-    const player: Player = {
-      id: playerId,
-      name: nickname.trim(),
-      alive: true,
-      joinedAt: Date.now(),
-      lastSeenAt: Date.now(),
-    };
-
-    const state = createInitialState(gameId, playerId, [player]);
-    localStorage.setItem(STORAGE_KEYS.gameId, gameId);
-    localStorage.setItem(STORAGE_KEYS.playerId, playerId);
-    localStorage.setItem(STORAGE_KEYS.playerName, player.name);
-    localStorage.setItem(STORAGE_KEYS.playerToken, playerToken);
-    setClient({ gameId, playerId, playerName: player.name, playerToken });
-    setGameState(state);
-    setSettingsDraft(state.settings);
-    storeLocalState(state);
-    await relaySendEvent(gameId, {
-      type: "JOIN",
-      id: generateId(12),
-      createdAt: Date.now(),
-      payload: { playerId, name: player.name, token: playerToken },
-    });
-    await publishState(state);
+    setIsLoading(true);
+    try {
+      const result = await apiCreateGame(nickname.trim());
+      localStorage.setItem(STORAGE_KEYS.gameId, result.gameId);
+      localStorage.setItem(STORAGE_KEYS.playerId, result.playerId);
+      localStorage.setItem(STORAGE_KEYS.playerName, nickname.trim());
+      localStorage.setItem(STORAGE_KEYS.playerToken, result.token);
+      setClient({
+        gameId: result.gameId,
+        playerId: result.playerId,
+        playerName: nickname.trim(),
+        playerToken: result.token,
+      });
+      setGameState(result.state);
+      setSettingsDraft(result.state.settings);
+    } catch (err: any) {
+      setStatusMessage(err.message || "Failed to create game");
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   const handleJoinGame = async () => {
@@ -923,278 +596,158 @@ export default function Home() {
       setStatusMessage("Enter a nickname and game code.");
       return;
     }
-    masterCacheRef.current = {
-      eventCursor: 0,
-      nightActions: new Map(),
-      nightRituals: new Map(),
-      votes: new Map(),
-    };
-    const gameId = joinCode.trim().toUpperCase();
-    const playerId = generateId(8);
-    const playerToken = generateId(12);
-    localStorage.setItem(STORAGE_KEYS.gameId, gameId);
-    localStorage.setItem(STORAGE_KEYS.playerId, playerId);
-    localStorage.setItem(STORAGE_KEYS.playerName, nickname.trim());
-    localStorage.setItem(STORAGE_KEYS.playerToken, playerToken);
-    setClient({ gameId, playerId, playerName: nickname.trim(), playerToken });
-    setSettingsDraft(null);
-    await relaySendEvent(gameId, {
-      type: "JOIN",
-      id: generateId(12),
-      createdAt: Date.now(),
-      payload: { playerId, name: nickname.trim(), token: playerToken },
-    });
-    setStatusMessage("Joined. Waiting for the master device to add you.");
+    setIsLoading(true);
+    try {
+      const result = await apiJoinGame(joinCode.trim().toUpperCase(), nickname.trim());
+      localStorage.setItem(STORAGE_KEYS.gameId, result.gameId);
+      localStorage.setItem(STORAGE_KEYS.playerId, result.playerId);
+      localStorage.setItem(STORAGE_KEYS.playerName, nickname.trim());
+      localStorage.setItem(STORAGE_KEYS.playerToken, result.token);
+      setClient({
+        gameId: result.gameId,
+        playerId: result.playerId,
+        playerName: nickname.trim(),
+        playerToken: result.token,
+      });
+      setGameState(result.state);
+      setSettingsDraft(result.state.settings);
+      setShowQRScanner(false);
+    } catch (err: any) {
+      setStatusMessage(err.message || "Failed to join game");
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   const handleStartGame = async () => {
-    if (!gameState || !client) {
-      return;
-    }
+    if (!client || !gameState) return;
     if (gameState.players.length < MIN_PLAYERS_TO_START) {
-      setStatusMessage(`At least ${MIN_PLAYERS_TO_START} players are required to start.`);
+      setStatusMessage(`At least ${MIN_PLAYERS_TO_START} players required.`);
       return;
     }
-    const assigned = assignRoles(gameState.players);
-    const roleMap = assigned.reduce<Record<string, Role>>((acc, player) => {
-      if (player.role) {
-        acc[player.id] = player.role;
-      }
-      return acc;
-    }, {});
-    saveMasterRoles(roleMap);
-
-    for (const player of assigned) {
-      if (!player.role) {
-        continue;
-      }
-      await relaySendSecret(gameState.id, player.id, {
-        type: "ROLE_ASSIGNMENT",
-        createdAt: Date.now(),
-        payload: { role: player.role },
-      });
-      if (player.id === client.playerId) {
-        setPlayerRole(player.role);
-        localStorage.setItem(STORAGE_KEYS.playerRole, player.role);
-      }
+    setIsLoading(true);
+    try {
+      const result = await apiStartGame(client.gameId, client.playerId, client.playerToken);
+      setGameState(result.state);
+    } catch (err: any) {
+      setStatusMessage(err.message || "Failed to start game");
+    } finally {
+      setIsLoading(false);
     }
-
-    masterCacheRef.current.nightActions.clear();
-    masterCacheRef.current.nightRituals.clear();
-    masterCacheRef.current.votes.clear();
-    const next: GameState = {
-      ...gameState,
-      phase: "NIGHT",
-      currentNight: 1,
-      phaseId: undefined,
-      phaseStartedAt: Date.now(),
-      lastResolution: undefined,
-      lastVoteResult: undefined,
-      winner: undefined,
-      version: gameState.version + 1,
-    };
-    publishState(next);
   };
 
-  const handleStartVoting = () => {
-    if (!gameState) {
-      return;
+  const handleSaveSettings = async () => {
+    if (!client || !gameState || !settingsDraft) return;
+    setIsLoading(true);
+    try {
+      const result = await apiUpdateSettings(
+        client.gameId,
+        client.playerId,
+        client.playerToken,
+        {
+          nightSeconds: clampNumber(settingsDraft.nightSeconds, 10, 1800),
+          daySeconds: clampNumber(settingsDraft.daySeconds, 10, 3600),
+          votingSeconds: clampNumber(settingsDraft.votingSeconds, 10, 1800),
+          autoAdvance: settingsDraft.autoAdvance,
+          revealRoleOnDeath: settingsDraft.revealRoleOnDeath,
+        }
+      );
+      setGameState(result.state);
+      setStatusMessage("Settings saved.");
+    } catch (err: any) {
+      setStatusMessage(err.message || "Failed to save settings");
+    } finally {
+      setIsLoading(false);
     }
-    if (!isMaster) {
-      return;
-    }
-    const phaseId = `VOTE-${gameState.currentNight}-${Date.now()}`;
-    masterCacheRef.current.votes.clear();
-    const next: GameState = {
-      ...gameState,
-      phase: "VOTING",
-      phaseId,
-      phaseStartedAt: Date.now(),
-      version: gameState.version + 1,
-    };
-    publishState(next);
-  };
-
-  const handleStartNight = () => {
-    if (!gameState) {
-      return;
-    }
-    if (!isMaster) {
-      return;
-    }
-    masterCacheRef.current.nightActions.clear();
-    masterCacheRef.current.nightRituals.clear();
-    masterCacheRef.current.votes.clear();
-    const next: GameState = {
-      ...gameState,
-      phase: "NIGHT",
-      currentNight: gameState.currentNight + 1,
-      phaseId: undefined,
-      phaseStartedAt: Date.now(),
-      lastResolution: undefined,
-      lastVoteResult: undefined,
-      winner: undefined,
-      version: gameState.version + 1,
-    };
-    publishState(next);
-  };
-
-  const handleRestartWithSamePlayers = async () => {
-    if (!client || !gameState || !isMaster) {
-      return;
-    }
-
-    masterCacheRef.current.nightActions.clear();
-    masterCacheRef.current.nightRituals.clear();
-    masterCacheRef.current.votes.clear();
-    localStorage.removeItem(STORAGE_KEYS.masterRoles);
-
-    await Promise.all(
-      gameState.players.map((player) =>
-        relaySendSecret(gameState.id, player.id, {
-          type: "GAME_RESET",
-          createdAt: Date.now(),
-          payload: {},
-        }),
-      ),
-    );
-
-    const resetPlayers = gameState.players.map((player) => ({
-      ...player,
-      alive: true,
-    }));
-
-    const next: GameState = {
-      ...gameState,
-      status: "ACTIVE",
-      phase: "LOBBY",
-      currentNight: 0,
-      phaseId: undefined,
-      phaseStartedAt: Date.now(),
-      lastResolution: undefined,
-      lastVoteResult: undefined,
-      winner: undefined,
-      revealedRoles: undefined,
-      players: resetPlayers,
-      version: gameState.version + 1,
-    };
-
-    publishState(next);
-  };
-
-  const handleSaveSettings = () => {
-    if (!gameState || !settingsDraft || !isMaster) {
-      return;
-    }
-    const next: GameState = {
-      ...gameState,
-      settings: {
-        nightSeconds: clampNumber(settingsDraft.nightSeconds, 10, 60 * 30),
-        daySeconds: clampNumber(settingsDraft.daySeconds, 10, 60 * 60),
-        votingSeconds: clampNumber(settingsDraft.votingSeconds, 10, 60 * 30),
-        autoAdvance: settingsDraft.autoAdvance,
-        revealRoleOnDeath: settingsDraft.revealRoleOnDeath,
-      },
-      version: gameState.version + 1,
-    };
-    publishState(next);
-    setStatusMessage("Settings updated.");
   };
 
   const handleSubmitAction = async () => {
-    if (!client || !gameState || !selectedTarget || !playerRole) {
-      return;
-    }
+    if (!client || !gameState || !selectedTarget || !playerRole) return;
     const actionType =
-      playerRole === "MAFIA"
-        ? "KILL"
-        : playerRole === "DOCTOR"
-          ? "SAVE"
-          : "INSPECT";
+      playerRole === "MAFIA" ? "KILL" : playerRole === "DOCTOR" ? "SAVE" : "INSPECT";
 
-    const action: Action = {
-      gameId: gameState.id,
-      nightNumber: gameState.currentNight,
-      playerId: client.playerId,
-      type: actionType,
-      targetPlayerId: selectedTarget,
-      createdAt: Date.now(),
-    };
-    await relaySendEvent(gameState.id, {
-      type: "ACTION",
-      id: generateId(12),
-      createdAt: Date.now(),
-      payload: action,
-    });
-    setSelectedTarget("");
+    setIsLoading(true);
+    try {
+      await apiSubmitAction(
+        client.gameId,
+        client.playerId,
+        client.playerToken,
+        actionType,
+        selectedTarget
+      );
+      setActionSubmittedNight(gameState.currentNight);
+      setSelectedTarget("");
+      setStatusMessage("Action submitted. Waiting for others...");
+    } catch (err: any) {
+      setStatusMessage(err.message || "Failed to submit action");
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   const handleSubmitRitual = async () => {
-    if (!client || !gameState) {
-      return;
-    }
-    if (gameState.phase !== "NIGHT") {
-      return;
-    }
+    if (!client || !gameState) return;
     if (!ritualChoice) {
       setStatusMessage("Pick an option to complete your night ritual.");
       return;
     }
-    const ritual = pickRitual(gameState.currentNight, client.playerId);
-    await relaySendEvent(gameState.id, {
-      type: "RITUAL",
-      id: generateId(12),
-      createdAt: Date.now(),
-      payload: {
-        gameId: gameState.id,
-        nightNumber: gameState.currentNight,
-        playerId: client.playerId,
-        promptId: ritual.id,
-        choice: ritualChoice,
-      },
-    });
-    setRitualSubmittedNight(gameState.currentNight);
-    setStatusMessage("Ritual complete. Waiting for others…");
+    setIsLoading(true);
+    try {
+      await apiSubmitRitual(client.gameId, client.playerId, client.playerToken);
+      setRitualSubmittedNight(gameState.currentNight);
+      setStatusMessage("Ritual complete. Waiting for others...");
+    } catch (err: any) {
+      setStatusMessage(err.message || "Failed to submit ritual");
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   const handleSubmitVote = async () => {
-    if (!client || !gameState || !gameState.phaseId || !voteTarget) {
-      return;
+    if (!client || !gameState || !voteTarget) return;
+    setIsLoading(true);
+    try {
+      await apiSubmitVote(client.gameId, client.playerId, client.playerToken, voteTarget);
+      setVoteSubmittedPhase(gameState.phaseId || null);
+      setVoteTarget("");
+      setStatusMessage("Vote submitted. Waiting for others...");
+    } catch (err: any) {
+      setStatusMessage(err.message || "Failed to submit vote");
+    } finally {
+      setIsLoading(false);
     }
-    const vote: Vote = {
-      gameId: gameState.id,
-      phaseId: gameState.phaseId,
-      voterId: client.playerId,
-      targetPlayerId: voteTarget,
-      createdAt: Date.now(),
-    };
-    await relaySendEvent(gameState.id, {
-      type: "VOTE",
-      id: generateId(12),
-      createdAt: Date.now(),
-      payload: vote,
-    });
-    setVoteTarget("");
   };
 
-  const handleTakeOver = () => {
-    if (!client || !gameState) {
-      return;
+  const handleStartVoting = async () => {
+    if (!client || !gameState) return;
+    setIsLoading(true);
+    try {
+      const result = await apiAdvancePhase(client.gameId, client.playerId, client.playerToken);
+      setGameState(result.state);
+    } catch (err: any) {
+      setStatusMessage(err.message || "Failed to start voting");
+    } finally {
+      setIsLoading(false);
     }
-    void (async () => {
-      const result = await relayClaimMaster(
-        gameState.id,
-        client.playerId,
-        client.playerToken,
-      );
-      if (result?.state) {
-        setGameState(result.state);
-        storeLocalState(result.state);
-        setStatusMessage("You are now the master device.");
-      } else {
-        setStatusMessage("Could not take over. Another master is active.");
-      }
-    })();
+  };
+
+  const handleRestartGame = async () => {
+    if (!client || !gameState) return;
+    setIsLoading(true);
+    try {
+      const result = await apiRestartGame(client.gameId, client.playerId, client.playerToken);
+      setGameState(result.state);
+      setPlayerRole(null);
+      localStorage.removeItem(STORAGE_KEYS.playerRole);
+      setInspectionResults([]);
+      setActionSubmittedNight(null);
+      setRitualSubmittedNight(null);
+      setVoteSubmittedPhase(null);
+    } catch (err: any) {
+      setStatusMessage(err.message || "Failed to restart game");
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   const handleInstallPWA = async () => {
@@ -1204,10 +757,8 @@ export default function Home() {
       if (outcome === "accepted") {
         setShowInstallPrompt(false);
         setDeferredPrompt(null);
-        installPromptRef.current = null;
       }
     } else {
-      // iOS - just show instructions, user needs to manually install
       setShowInstallPrompt(false);
     }
   };
@@ -1219,16 +770,16 @@ export default function Home() {
     setPlayerRole(null);
     setStatusMessage(null);
     setSettingsDraft(null);
-    masterCacheRef.current = {
-      eventCursor: 0,
-      nightActions: new Map(),
-      nightRituals: new Map(),
-      votes: new Map(),
-    };
+    setInspectionResults([]);
+    setActionSubmittedNight(null);
+    setRitualSubmittedNight(null);
+    setVoteSubmittedPhase(null);
   };
 
+  // ============ RENDER ============
+
   if (!client) {
-  return (
+    return (
       <div className="min-h-screen bg-gradient-to-br from-violet-950 via-slate-950 to-black px-6 py-10 text-white">
         {showInstallPrompt && (
           <div className="mx-auto mb-4 w-full max-w-xl rounded-2xl bg-violet-500/90 p-4 shadow-2xl ring-1 ring-violet-400/50 backdrop-blur">
@@ -1276,22 +827,23 @@ export default function Home() {
             <input
               className="w-full rounded-xl border border-white/10 bg-white/10 px-4 py-2 text-white placeholder:text-white/40 outline-none focus:ring-2 focus:ring-violet-400/70"
               value={nickname}
-              onChange={(event) => setNickname(event.target.value)}
+              onChange={(e) => setNickname(e.target.value)}
               placeholder="Your name"
             />
           </div>
           <div className="flex flex-col gap-3 sm:flex-row">
             <button
-              className="flex-1 rounded-xl bg-violet-500 px-4 py-2 font-semibold text-white shadow-lg shadow-violet-500/20 transition hover:bg-violet-400"
+              className="flex-1 rounded-xl bg-violet-500 px-4 py-2 font-semibold text-white shadow-lg shadow-violet-500/20 transition hover:bg-violet-400 disabled:opacity-50"
               onClick={handleCreateGame}
+              disabled={isLoading}
             >
-              Create Game
+              {isLoading ? "Creating..." : "Create Game"}
             </button>
             <div className="flex flex-1 gap-2">
               <input
                 className="w-full rounded-xl border border-white/10 bg-white/10 px-4 py-2 text-white placeholder:text-white/40 outline-none focus:ring-2 focus:ring-violet-400/70"
                 value={joinCode}
-                onChange={(event) => setJoinCode(event.target.value.toUpperCase())}
+                onChange={(e) => setJoinCode(e.target.value.toUpperCase())}
                 placeholder="Game code"
               />
               <button
@@ -1303,55 +855,55 @@ export default function Home() {
                 📷
               </button>
               <button
-                className="rounded-xl bg-white/10 px-4 py-2 font-medium text-white ring-1 ring-white/15 transition hover:bg-white/15"
+                className="rounded-xl bg-white/10 px-4 py-2 font-medium text-white ring-1 ring-white/15 transition hover:bg-white/15 disabled:opacity-50"
                 onClick={handleJoinGame}
+                disabled={isLoading}
               >
                 Join
               </button>
             </div>
-            {showQRScanner && (
-              <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4">
-                <div className="w-full max-w-md rounded-2xl bg-white/10 p-6 shadow-2xl ring-1 ring-white/10 backdrop-blur">
-                  <div className="mb-4 flex items-center justify-between">
-                    <p className="text-lg font-semibold text-white">Scan QR Code</p>
-                    <button
-                      type="button"
-                      onClick={() => setShowQRScanner(false)}
-                      className="rounded-xl bg-white/10 px-3 py-2 text-sm font-semibold text-white ring-1 ring-white/15 transition hover:bg-white/15"
-                    >
-                      ✕
-                    </button>
-                  </div>
-                  <div className="space-y-3">
-                    <p className="text-sm text-white/80">
-                      Use your device camera to scan the game code QR code, or enter it manually
-                      below.
-                    </p>
-                    <input
-                      type="text"
-                      className="w-full rounded-xl border border-white/10 bg-white/10 px-4 py-2 text-white placeholder:text-white/40 outline-none focus:ring-2 focus:ring-violet-400/70"
-                      value={joinCode}
-                      onChange={(event) => setJoinCode(event.target.value.toUpperCase())}
-                      placeholder="Or type game code here"
-                      autoFocus
-                    />
-                    <button
-                      type="button"
-                      className="w-full rounded-xl bg-violet-500 px-4 py-2 font-semibold text-white shadow-lg shadow-violet-500/20 transition hover:bg-violet-400"
-                      onClick={() => {
-                        if (joinCode.trim()) {
-                          handleJoinGame();
-                          setShowQRScanner(false);
-                        }
-                      }}
-                    >
-                      Join Game
-                    </button>
-                  </div>
+          </div>
+          {showQRScanner && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4">
+              <div className="w-full max-w-md rounded-2xl bg-white/10 p-6 shadow-2xl ring-1 ring-white/10 backdrop-blur">
+                <div className="mb-4 flex items-center justify-between">
+                  <p className="text-lg font-semibold text-white">Join Game</p>
+                  <button
+                    type="button"
+                    onClick={() => setShowQRScanner(false)}
+                    className="rounded-xl bg-white/10 px-3 py-2 text-sm font-semibold text-white ring-1 ring-white/15 transition hover:bg-white/15"
+                  >
+                    ✕
+                  </button>
+                </div>
+                <div className="space-y-3">
+                  <p className="text-sm text-white/80">Enter the game code to join.</p>
+                  <input
+                    type="text"
+                    className="w-full rounded-xl border border-white/10 bg-white/10 px-4 py-2 text-white placeholder:text-white/40 outline-none focus:ring-2 focus:ring-violet-400/70"
+                    value={joinCode}
+                    onChange={(e) => setJoinCode(e.target.value.toUpperCase())}
+                    placeholder="Game code"
+                    autoFocus
+                  />
+                  <button
+                    type="button"
+                    className="w-full rounded-xl bg-violet-500 px-4 py-2 font-semibold text-white shadow-lg shadow-violet-500/20 transition hover:bg-violet-400 disabled:opacity-50"
+                    onClick={() => {
+                      if (joinCode.trim() && nickname.trim()) {
+                        handleJoinGame();
+                      } else if (!nickname.trim()) {
+                        setStatusMessage("Enter a nickname first.");
+                      }
+                    }}
+                    disabled={isLoading}
+                  >
+                    {isLoading ? "Joining..." : "Join Game"}
+                  </button>
                 </div>
               </div>
-            )}
-          </div>
+            </div>
+          )}
           {statusMessage && <p className="text-sm text-white/80">{statusMessage}</p>}
         </div>
       </div>
@@ -1362,8 +914,8 @@ export default function Home() {
     return (
       <div className="min-h-screen bg-gradient-to-br from-violet-950 via-slate-950 to-black px-6 py-10 text-white">
         <div className="mx-auto w-full max-w-xl space-y-4 rounded-3xl bg-white/10 p-6 shadow-2xl ring-1 ring-white/10 backdrop-blur">
-          <h1 className="text-xl font-semibold">Joining game {client.gameId}</h1>
-          <p className="text-sm text-white/80">Waiting for the master device...</p>
+          <h1 className="text-xl font-semibold">Loading game {client.gameId}...</h1>
+          <p className="text-sm text-white/80">Please wait...</p>
           <button className="text-sm underline text-white/80" onClick={resetLocal}>
             Leave game
           </button>
@@ -1374,11 +926,16 @@ export default function Home() {
 
   const duration = getPhaseDurationSeconds(gameState.phase, gameState.settings);
   const remainingSeconds =
-    duration === null ? null : duration - (Date.now() - (gameState.phaseStartedAt ?? Date.now())) / 1000;
-  const isStale = lastStateAt ? Date.now() - lastStateAt > MASTER_STALE_MS : false;
+    duration === null
+      ? null
+      : duration - (Date.now() - (gameState.phaseStartedAt ?? Date.now())) / 1000;
   const scene = phaseToScene(gameState.phase, gameState.currentNight);
   const aliveCount = alivePlayers.length;
   const totalCount = gameState.players.length;
+
+  const actionAlreadySubmitted = actionSubmittedNight === gameState.currentNight;
+  const ritualAlreadySubmitted = ritualSubmittedNight === gameState.currentNight;
+  const voteAlreadySubmitted = voteSubmittedPhase === gameState.phaseId;
 
   return (
     <div className={`min-h-screen ${scene.bgClass} text-white`}>
@@ -1432,12 +989,8 @@ export default function Home() {
             >
               <div className="flip-inner relative h-[84px] w-full">
                 <div className="flip-face absolute inset-0 rounded-2xl bg-white/10 p-3 shadow-2xl ring-1 ring-white/10 backdrop-blur">
-                  <p className="text-[11px] uppercase tracking-wide text-white/60">
-                    Player
-                  </p>
-                  <p className="truncate text-lg font-semibold leading-6">
-                    {client.playerName}
-                  </p>
+                  <p className="text-[11px] uppercase tracking-wide text-white/60">Player</p>
+                  <p className="truncate text-lg font-semibold leading-6">{client.playerName}</p>
                   <p className="mt-1 text-xs text-white/60">
                     Tap to flip • {aliveCount}/{totalCount} alive
                   </p>
@@ -1445,22 +998,12 @@ export default function Home() {
                 <div className="flip-face flip-back absolute inset-0 rounded-2xl bg-white/10 p-3 shadow-2xl ring-1 ring-white/10 backdrop-blur">
                   <div className="flex items-start justify-between gap-2">
                     <div className="min-w-0">
-                      <p className="text-[11px] uppercase tracking-wide text-white/60">
-                        Game
-                      </p>
+                      <p className="text-[11px] uppercase tracking-wide text-white/60">Game</p>
                       <p className="text-lg font-semibold leading-6">{gameState.id}</p>
                     </div>
-                    {isMaster && (
-                      <span className="rounded-full bg-emerald-400/20 px-2 py-1 text-[10px] font-semibold text-emerald-200 ring-1 ring-emerald-300/20">
-                        MASTER
-                      </span>
-                    )}
                   </div>
                   <p className="mt-2 text-xs text-white/70">
-                    Role:{" "}
-                    <span className="font-semibold text-white">
-                      {playerRole ?? "Hidden"}
-                    </span>
+                    Role: <span className="font-semibold text-white">{playerRole ?? "Hidden"}</span>
                   </p>
                 </div>
               </div>
@@ -1468,9 +1011,7 @@ export default function Home() {
 
             <div className="flex flex-col items-end gap-2">
               <div className="rounded-2xl bg-white/10 px-4 py-3 text-right shadow-2xl ring-1 ring-white/10 backdrop-blur">
-                <p className="text-[11px] uppercase tracking-wide text-white/60">
-                  Time left
-                </p>
+                <p className="text-[11px] uppercase tracking-wide text-white/60">Time left</p>
                 <p
                   className={`text-xl font-semibold ${
                     remainingSeconds !== null && remainingSeconds <= 10
@@ -1488,15 +1029,6 @@ export default function Home() {
               >
                 Exit game
               </button>
-              {isStale && !isMaster && (
-                <button
-                  className="rounded-xl bg-white/10 px-3 py-2 text-xs font-semibold text-white ring-1 ring-white/15 transition hover:bg-white/15"
-                  onClick={handleTakeOver}
-                  type="button"
-                >
-                  Take over (master inactive)
-                </button>
-              )}
             </div>
           </div>
 
@@ -1515,23 +1047,15 @@ export default function Home() {
               <div className="space-y-4">
                 <div className="space-y-1">
                   <p className="text-sm text-white/80">
-                    Ask friends to join with the game code. Minimum{" "}
-                    {MIN_PLAYERS_TO_START} players to start.
-                  </p>
-                  <p className="text-xs text-white/60">
-                    Tip: everyone can keep this open; the game is resumable.
+                    Ask friends to join with the game code. Minimum {MIN_PLAYERS_TO_START} players.
                   </p>
                 </div>
 
                 <div className="flex flex-col items-center gap-3 rounded-2xl bg-white/5 p-4 ring-1 ring-white/10">
                   <p className="text-sm font-semibold text-white">Scan to join</p>
                   <div className="rounded-xl bg-white p-3">
-                    {/*
-                      Encode a URL (not just the raw code) so phone camera scanners open the app.
-                      The app will parse ?join=... and prefill the join code.
-                    */}
                     <QRCode
-                      value={`${window.location.origin}/?join=${encodeURIComponent(gameState.id)}`}
+                      value={`${typeof window !== "undefined" ? window.location.origin : ""}/?join=${encodeURIComponent(gameState.id)}`}
                       size={180}
                       level="M"
                       style={{ height: "auto", maxWidth: "100%", width: "100%" }}
@@ -1540,7 +1064,7 @@ export default function Home() {
                   <p className="text-xs text-white/70">Game code: {gameState.id}</p>
                 </div>
 
-                {isMaster && settingsDraft && (
+                {settingsDraft && (
                   <details className="rounded-2xl border border-white/10 bg-white/5 p-4">
                     <summary className="cursor-pointer select-none text-sm font-semibold text-white">
                       Settings
@@ -1557,9 +1081,7 @@ export default function Home() {
                             value={settingsDraft.nightSeconds}
                             onChange={(e) =>
                               setSettingsDraft((prev) =>
-                                prev
-                                  ? { ...prev, nightSeconds: Number(e.target.value) }
-                                  : prev,
+                                prev ? { ...prev, nightSeconds: Number(e.target.value) } : prev
                               )
                             }
                           />
@@ -1574,9 +1096,7 @@ export default function Home() {
                             value={settingsDraft.daySeconds}
                             onChange={(e) =>
                               setSettingsDraft((prev) =>
-                                prev
-                                  ? { ...prev, daySeconds: Number(e.target.value) }
-                                  : prev,
+                                prev ? { ...prev, daySeconds: Number(e.target.value) } : prev
                               )
                             }
                           />
@@ -1591,12 +1111,7 @@ export default function Home() {
                             value={settingsDraft.votingSeconds}
                             onChange={(e) =>
                               setSettingsDraft((prev) =>
-                                prev
-                                  ? {
-                                      ...prev,
-                                      votingSeconds: Number(e.target.value),
-                                    }
-                                  : prev,
+                                prev ? { ...prev, votingSeconds: Number(e.target.value) } : prev
                               )
                             }
                           />
@@ -1609,7 +1124,7 @@ export default function Home() {
                           checked={settingsDraft.autoAdvance}
                           onChange={(e) =>
                             setSettingsDraft((prev) =>
-                              prev ? { ...prev, autoAdvance: e.target.checked } : prev,
+                              prev ? { ...prev, autoAdvance: e.target.checked } : prev
                             )
                           }
                         />
@@ -1622,9 +1137,7 @@ export default function Home() {
                           checked={settingsDraft.revealRoleOnDeath}
                           onChange={(e) =>
                             setSettingsDraft((prev) =>
-                              prev
-                                ? { ...prev, revealRoleOnDeath: e.target.checked }
-                                : prev,
+                              prev ? { ...prev, revealRoleOnDeath: e.target.checked } : prev
                             )
                           }
                         />
@@ -1632,103 +1145,107 @@ export default function Home() {
                       </label>
 
                       <button
-                        className="rounded-xl bg-white/10 px-4 py-2 text-sm font-semibold text-white ring-1 ring-white/15 transition hover:bg-white/15"
+                        className="rounded-xl bg-white/10 px-4 py-2 text-sm font-semibold text-white ring-1 ring-white/15 transition hover:bg-white/15 disabled:opacity-50"
                         onClick={handleSaveSettings}
+                        disabled={isLoading}
                         type="button"
                       >
                         Save settings
                       </button>
-        </div>
+                    </div>
                   </details>
                 )}
 
-                {isMaster ? (
-                  <button
-                    className="w-full rounded-2xl bg-violet-500 px-4 py-3 text-base font-semibold text-white shadow-lg shadow-violet-500/20 transition hover:bg-violet-400 disabled:cursor-not-allowed disabled:opacity-50"
-                    onClick={handleStartGame}
-                    disabled={totalCount < MIN_PLAYERS_TO_START}
-                    type="button"
-                  >
-                    Start game
-                  </button>
-                ) : (
-                  <p className="text-sm text-white/70">
-                    Waiting for the master device to start the game…
-                  </p>
-                )}
+                <button
+                  className="w-full rounded-2xl bg-violet-500 px-4 py-3 text-base font-semibold text-white shadow-lg shadow-violet-500/20 transition hover:bg-violet-400 disabled:cursor-not-allowed disabled:opacity-50"
+                  onClick={handleStartGame}
+                  disabled={isLoading || totalCount < MIN_PLAYERS_TO_START}
+                  type="button"
+                >
+                  {isLoading ? "Starting..." : "Start game"}
+                </button>
               </div>
             )}
 
             {gameState.phase === "NIGHT" && (
               <div className="space-y-4">
                 {playerRole && playerRole !== "VILLAGER" ? (
-                  <>
-                    <p className="text-sm text-white/80">
-                      Choose a target and submit your action.
-                    </p>
-                    <select
-                      className="w-full rounded-2xl border border-white/10 bg-white/10 px-4 py-3 text-white outline-none focus:ring-2 focus:ring-cyan-300/70"
-                      value={selectedTarget}
-                      onChange={(event) => setSelectedTarget(event.target.value)}
-                    >
-                      <option value="">Select target</option>
-                      {alivePlayers.map((player) => (
-                        <option key={player.id} value={player.id}>
-                          {player.name}
-                        </option>
-                      ))}
-                    </select>
-                    <button
-                      className="w-full rounded-2xl bg-white/10 px-4 py-3 text-base font-semibold text-white ring-1 ring-white/15 transition hover:bg-white/15 disabled:cursor-not-allowed disabled:opacity-50"
-                      onClick={handleSubmitAction}
-                      disabled={!selectedTarget}
-                      type="button"
-                    >
-                      Submit{" "}
-                      {playerRole === "MAFIA"
-                        ? "kill"
-                        : playerRole === "DOCTOR"
-                          ? "save"
-                          : "inspect"}
-                    </button>
-                  </>
+                  actionAlreadySubmitted ? (
+                    <div className="text-center">
+                      <p className="text-sm text-white/80">Action submitted. Waiting for others...</p>
+                    </div>
+                  ) : (
+                    <>
+                      <p className="text-sm text-white/80">Choose a target and submit your action.</p>
+                      <select
+                        className="w-full rounded-2xl border border-white/10 bg-white/10 px-4 py-3 text-white outline-none focus:ring-2 focus:ring-cyan-300/70"
+                        value={selectedTarget}
+                        onChange={(e) => setSelectedTarget(e.target.value)}
+                      >
+                        <option value="">Select target</option>
+                        {alivePlayers.map((player) => (
+                          <option key={player.id} value={player.id}>
+                            {player.name}
+                          </option>
+                        ))}
+                      </select>
+                      <button
+                        className="w-full rounded-2xl bg-white/10 px-4 py-3 text-base font-semibold text-white ring-1 ring-white/15 transition hover:bg-white/15 disabled:cursor-not-allowed disabled:opacity-50"
+                        onClick={handleSubmitAction}
+                        disabled={!selectedTarget || isLoading}
+                        type="button"
+                      >
+                        {isLoading
+                          ? "Submitting..."
+                          : `Submit ${playerRole === "MAFIA" ? "kill" : playerRole === "DOCTOR" ? "save" : "inspect"}`}
+                      </button>
+                    </>
+                  )
                 ) : (
                   (() => {
                     const ritual = pickRitual(gameState.currentNight, client.playerId);
-                    const ritualDone = ritualSubmittedNight === gameState.currentNight;
                     return (
                       <div className="space-y-4">
-                        <p className="text-sm text-white/85">{ritual.prompt}</p>
-                        <div className="grid gap-2">
-                          {ritual.choices.map((choice) => (
+                        {ritualAlreadySubmitted ? (
+                          <div className="text-center">
+                            <p className="text-sm text-white/80">
+                              Ritual complete. Waiting for others...
+                            </p>
+                          </div>
+                        ) : (
+                          <>
+                            <p className="text-sm text-white/85">{ritual.prompt}</p>
+                            <div className="grid gap-2">
+                              {ritual.choices.map((choice) => (
+                                <button
+                                  key={choice}
+                                  type="button"
+                                  className={`w-full rounded-2xl px-4 py-3 text-left text-sm font-semibold ring-1 transition ${
+                                    ritualChoice === choice
+                                      ? "bg-cyan-400/20 text-cyan-100 ring-cyan-300/30"
+                                      : "bg-white/10 text-white ring-white/15 hover:bg-white/15"
+                                  }`}
+                                  onClick={() => setRitualChoice(choice)}
+                                >
+                                  {choice}
+                                </button>
+                              ))}
+                            </div>
                             <button
-                              key={choice}
+                              className="w-full rounded-2xl bg-white/10 px-4 py-3 text-base font-semibold text-white ring-1 ring-white/15 transition hover:bg-white/15 disabled:cursor-not-allowed disabled:opacity-50"
+                              onClick={handleSubmitRitual}
+                              disabled={isLoading}
                               type="button"
-                              className={`w-full rounded-2xl px-4 py-3 text-left text-sm font-semibold ring-1 transition ${
-                                ritualChoice === choice
-                                  ? "bg-cyan-400/20 text-cyan-100 ring-cyan-300/30"
-                                  : "bg-white/10 text-white ring-white/15 hover:bg-white/15"
-                              }`}
-                              onClick={() => setRitualChoice(choice)}
-                              disabled={ritualDone}
                             >
-                              {choice}
+                              {isLoading ? "Submitting..." : "Confirm ritual"}
                             </button>
-                          ))}
-                        </div>
-                        <button
-                          className="w-full rounded-2xl bg-white/10 px-4 py-3 text-base font-semibold text-white ring-1 ring-white/15 transition hover:bg-white/15 disabled:cursor-not-allowed disabled:opacity-50"
-                          onClick={handleSubmitRitual}
-                          disabled={ritualDone}
-                          type="button"
-                        >
-                          {ritualDone ? "Ritual complete" : "Confirm ritual"}
-                        </button>
-                        <p className="text-xs text-white/60">
-                          This does not affect the game — it’s just camouflage so everyone taps.
-                        </p>
-    </div>
-  );
+                            <p className="text-xs text-white/60">
+                              This does not affect the game — it's camouflage so everyone taps.
+                            </p>
+                          </>
+                        )}
+                      </div>
+                    );
                   })()
                 )}
               </div>
@@ -1742,7 +1259,7 @@ export default function Home() {
                     {gameState.lastResolution?.killedPlayerId
                       ? `Eliminated: ${
                           gameState.players.find(
-                            (p) => p.id === gameState.lastResolution?.killedPlayerId,
+                            (p) => p.id === gameState.lastResolution?.killedPlayerId
                           )?.name ?? "Unknown"
                         }${
                           gameState.lastResolution?.killedRole
@@ -1752,41 +1269,48 @@ export default function Home() {
                       : "No one was eliminated."}
                   </p>
                 </div>
-                {isMaster && (
-                  <button
-                    className="w-full rounded-2xl bg-amber-400 px-4 py-3 text-base font-semibold text-black shadow-lg shadow-amber-400/20 transition hover:bg-amber-300"
-                    onClick={handleStartVoting}
-                    type="button"
-                  >
-                    Start voting
-                  </button>
-                )}
+                <button
+                  className="w-full rounded-2xl bg-amber-400 px-4 py-3 text-base font-semibold text-black shadow-lg shadow-amber-400/20 transition hover:bg-amber-300 disabled:opacity-50"
+                  onClick={handleStartVoting}
+                  disabled={isLoading}
+                  type="button"
+                >
+                  {isLoading ? "Starting..." : "Start voting"}
+                </button>
               </div>
             )}
 
             {gameState.phase === "VOTING" && (
               <div className="space-y-4">
-                <p className="text-sm text-white/80">Cast your vote (secret).</p>
-                <select
-                  className="w-full rounded-2xl border border-white/10 bg-white/10 px-4 py-3 text-white outline-none focus:ring-2 focus:ring-amber-300/70"
-                  value={voteTarget}
-                  onChange={(event) => setVoteTarget(event.target.value)}
-                >
-                  <option value="">Select player</option>
-                  {alivePlayers.map((player) => (
-                    <option key={player.id} value={player.id}>
-                      {player.name}
-                    </option>
-                  ))}
-                </select>
-                <button
-                  className="w-full rounded-2xl bg-amber-400 px-4 py-3 text-base font-semibold text-black shadow-lg shadow-amber-400/20 transition hover:bg-amber-300 disabled:cursor-not-allowed disabled:opacity-50"
-                  onClick={handleSubmitVote}
-                  disabled={!voteTarget}
-                  type="button"
-                >
-                  Submit vote
-                </button>
+                {voteAlreadySubmitted ? (
+                  <div className="text-center">
+                    <p className="text-sm text-white/80">Vote submitted. Waiting for others...</p>
+                  </div>
+                ) : (
+                  <>
+                    <p className="text-sm text-white/80">Cast your vote (secret).</p>
+                    <select
+                      className="w-full rounded-2xl border border-white/10 bg-white/10 px-4 py-3 text-white outline-none focus:ring-2 focus:ring-amber-300/70"
+                      value={voteTarget}
+                      onChange={(e) => setVoteTarget(e.target.value)}
+                    >
+                      <option value="">Select player</option>
+                      {alivePlayers.map((player) => (
+                        <option key={player.id} value={player.id}>
+                          {player.name}
+                        </option>
+                      ))}
+                    </select>
+                    <button
+                      className="w-full rounded-2xl bg-amber-400 px-4 py-3 text-base font-semibold text-black shadow-lg shadow-amber-400/20 transition hover:bg-amber-300 disabled:cursor-not-allowed disabled:opacity-50"
+                      onClick={handleSubmitVote}
+                      disabled={!voteTarget || isLoading}
+                      type="button"
+                    >
+                      {isLoading ? "Submitting..." : "Submit vote"}
+                    </button>
+                  </>
+                )}
               </div>
             )}
 
@@ -1799,7 +1323,7 @@ export default function Home() {
                       ? "Tie — no one is eliminated."
                       : `Eliminated: ${
                           gameState.players.find(
-                            (p) => p.id === gameState.lastVoteResult?.eliminatedPlayerId,
+                            (p) => p.id === gameState.lastVoteResult?.eliminatedPlayerId
                           )?.name ?? "Unknown"
                         }${
                           gameState.lastVoteResult?.eliminatedRole
@@ -1808,15 +1332,9 @@ export default function Home() {
                         }`}
                   </p>
                 </div>
-                {isMaster && (
-                  <button
-                    className="w-full rounded-2xl bg-violet-500 px-4 py-3 text-base font-semibold text-white shadow-lg shadow-violet-500/20 transition hover:bg-violet-400"
-                    onClick={handleStartNight}
-                    type="button"
-                  >
-                    Start next night
-                  </button>
-                )}
+                <p className="text-center text-sm text-white/60">
+                  Next night will start automatically...
+                </p>
               </div>
             )}
 
@@ -1848,15 +1366,14 @@ export default function Home() {
                     </div>
                   </div>
                 )}
-                {isMaster && (
-                  <button
-                    className="w-full rounded-2xl bg-violet-500 px-4 py-3 text-base font-semibold text-white shadow-lg shadow-violet-500/20 transition hover:bg-violet-400"
-                    onClick={handleRestartWithSamePlayers}
-                    type="button"
-                  >
-                    Restart with same players
-                  </button>
-                )}
+                <button
+                  className="w-full rounded-2xl bg-violet-500 px-4 py-3 text-base font-semibold text-white shadow-lg shadow-violet-500/20 transition hover:bg-violet-400 disabled:opacity-50"
+                  onClick={handleRestartGame}
+                  disabled={isLoading}
+                  type="button"
+                >
+                  {isLoading ? "Restarting..." : "Restart with same players"}
+                </button>
                 <button
                   className="w-full rounded-2xl bg-white/10 px-4 py-3 text-base font-semibold text-white ring-1 ring-white/15 transition hover:bg-white/15"
                   onClick={resetLocal}
@@ -1908,11 +1425,9 @@ export default function Home() {
                     <p className="text-sm font-semibold">Detective notes</p>
                     <div className="mt-2 space-y-1 text-sm text-white/80">
                       {inspectionResults.map((result, index) => {
-                        if (result.type !== "INSPECTION_RESULT") {
-                          return null;
-                        }
+                        if (result.type !== "INSPECTION_RESULT") return null;
                         const target = gameState.players.find(
-                          (player) => player.id === result.payload.targetPlayerId,
+                          (p) => p.id === result.payload.targetPlayerId
                         );
                         return (
                           <p key={`${result.payload.targetPlayerId}-${index}`}>
