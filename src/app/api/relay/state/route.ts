@@ -2,6 +2,18 @@ import { NextResponse } from "next/server";
 import type { GameState } from "@/lib/types";
 import { getEvents, getState, setState } from "@/lib/relayStore";
 
+function sanitizeErrorMessage(message: string): string {
+  return message
+    .replace(/mongodb(\+srv)?:\/\/[^ \n)]+/gi, "mongodb://***")
+    .slice(0, 300);
+}
+
+function requestId(): string {
+  // crypto.randomUUID is available in modern runtimes; fallback if not.
+  // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
+  return (globalThis.crypto as any)?.randomUUID?.() ?? Math.random().toString(36).slice(2);
+}
+
 export async function GET(request: Request) {
   try {
     const { searchParams } = new URL(request.url);
@@ -65,8 +77,19 @@ export async function GET(request: Request) {
 
     return NextResponse.json({ state });
   } catch (error) {
-    console.error("GET /api/relay/state error:", error);
-    return NextResponse.json({ error: "internal_error" }, { status: 500 });
+    const id = requestId();
+    console.error(`[${id}] GET /api/relay/state error:`, error);
+    const err = error as any;
+    const message =
+      typeof err?.message === "string" ? sanitizeErrorMessage(err.message) : "unknown_error";
+    return NextResponse.json(
+      {
+        error: "internal_error",
+        requestId: id,
+        details: { name: err?.name, code: err?.code, message },
+      },
+      { status: 500 },
+    );
   }
 }
 
@@ -90,7 +113,18 @@ export async function POST(request: Request) {
 
     return NextResponse.json({ state: nextState });
   } catch (error) {
-    console.error("POST /api/relay/state error:", error);
-    return NextResponse.json({ error: "internal_error" }, { status: 500 });
+    const id = requestId();
+    console.error(`[${id}] POST /api/relay/state error:`, error);
+    const err = error as any;
+    const message =
+      typeof err?.message === "string" ? sanitizeErrorMessage(err.message) : "unknown_error";
+    return NextResponse.json(
+      {
+        error: "internal_error",
+        requestId: id,
+        details: { name: err?.name, code: err?.code, message },
+      },
+      { status: 500 },
+    );
   }
 }
