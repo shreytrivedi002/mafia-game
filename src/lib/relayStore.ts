@@ -10,6 +10,7 @@ const COLLECTIONS = {
 
 type RelayGameDoc = {
   _id: string; // gameId
+  gameId?: string; // Some deployments have a unique index on this field
   state?: GameState;
   nextEventIndex: number;
   updatedAt: number;
@@ -90,6 +91,7 @@ export async function setState(gameId: string, nextState: GameState): Promise<Ga
     { _id: gameId },
     {
       $set: {
+        gameId,
         state: nextState,
         updatedAt: Date.now(),
       },
@@ -113,8 +115,8 @@ export async function addEvent(gameId: string, event: RelayEvent): Promise<numbe
     { _id: gameId },
     {
       $inc: { nextEventIndex: 1 },
-      $set: { updatedAt: Date.now() },
-      $setOnInsert: { nextEventIndex: 1 },
+      $set: { updatedAt: Date.now(), gameId },
+      $setOnInsert: { nextEventIndex: 1, gameId },
     },
     { upsert: true, returnDocument: "before" },
   );
