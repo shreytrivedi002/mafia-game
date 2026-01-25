@@ -19,11 +19,17 @@ export async function GET(request: Request) {
     const gameId = searchParams.get("gameId");
     const after = Number(searchParams.get("after") ?? "0");
     if (!gameId) {
-      return NextResponse.json({ error: "gameId required" }, { status: 400 });
+      return NextResponse.json(
+        { error: "gameId required" },
+        { status: 400, headers: { "Cache-Control": "no-store" } },
+      );
     }
 
     const events = await getEvents(gameId, Number.isNaN(after) ? 0 : after);
-    return NextResponse.json({ events });
+    return NextResponse.json(
+      { events },
+      { status: 200, headers: { "Cache-Control": "no-store" } },
+    );
   } catch (error) {
     const id = requestId();
     console.error(`[${id}] GET /api/relay/events error:`, error);
@@ -32,7 +38,7 @@ export async function GET(request: Request) {
       typeof err?.message === "string" ? sanitizeErrorMessage(err.message) : "unknown_error";
     return NextResponse.json(
       { error: "internal_error", requestId: id, details: { name: err?.name, code: err?.code, message } },
-      { status: 500 },
+      { status: 500, headers: { "Cache-Control": "no-store" } },
     );
   }
 }
@@ -41,7 +47,10 @@ export async function POST(request: Request) {
   try {
     const body = (await request.json()) as { gameId?: string; event?: RelayEvent };
     if (!body.gameId || !body.event) {
-      return NextResponse.json({ error: "gameId and event required" }, { status: 400 });
+      return NextResponse.json(
+        { error: "gameId and event required" },
+        { status: 400, headers: { "Cache-Control": "no-store" } },
+      );
     }
     const event = body.event;
 
@@ -86,7 +95,10 @@ export async function POST(request: Request) {
 
     const index = await addEvent(body.gameId, body.event);
     if (index === null) {
-      return NextResponse.json({ duplicated: true }, { status: 200 });
+      return NextResponse.json(
+        { duplicated: true },
+        { status: 200, headers: { "Cache-Control": "no-store" } },
+      );
     }
 
     // Simple + reliable: JOIN always appends the player to state.players server-side.
@@ -144,7 +156,10 @@ export async function POST(request: Request) {
       }
     }
 
-    return NextResponse.json({ index });
+    return NextResponse.json(
+      { index },
+      { status: 200, headers: { "Cache-Control": "no-store" } },
+    );
   } catch (error) {
     const id = requestId();
     console.error(`[${id}] POST /api/relay/events error:`, error);
@@ -153,7 +168,7 @@ export async function POST(request: Request) {
       typeof err?.message === "string" ? sanitizeErrorMessage(err.message) : "unknown_error";
     return NextResponse.json(
       { error: "internal_error", requestId: id, details: { name: err?.name, code: err?.code, message } },
-      { status: 500 },
+      { status: 500, headers: { "Cache-Control": "no-store" } },
     );
   }
 }

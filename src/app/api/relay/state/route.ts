@@ -33,7 +33,10 @@ export async function GET(request: Request) {
     const { searchParams } = new URL(request.url);
     const gameId = searchParams.get("gameId");
     if (!gameId) {
-      return NextResponse.json({ error: "gameId required" }, { status: 400 });
+      return NextResponse.json(
+        { error: "gameId required" },
+        { status: 400, headers: { "Cache-Control": "no-store" } },
+      );
     }
 
     const state = await getState(gameId);
@@ -46,7 +49,10 @@ export async function GET(request: Request) {
         .map((e) => ({ playerId: e.payload.playerId, name: e.payload.name }));
 
       if (joins.length === 0) {
-        return NextResponse.json({ error: "not_found" }, { status: 404 });
+        return NextResponse.json(
+          { error: "not_found" },
+          { status: 404, headers: { "Cache-Control": "no-store" } },
+        );
       }
 
       const now = Date.now();
@@ -86,10 +92,16 @@ export async function GET(request: Request) {
       };
 
       await setState(gameId, reconstructed);
-      return NextResponse.json({ state: reconstructed });
+      return NextResponse.json(
+        { state: reconstructed },
+        { status: 200, headers: { "Cache-Control": "no-store" } },
+      );
     }
 
-    return NextResponse.json({ state });
+    return NextResponse.json(
+      { state },
+      { status: 200, headers: { "Cache-Control": "no-store" } },
+    );
   } catch (error) {
     const id = requestId();
     console.error(`[${id}] GET /api/relay/state error:`, error);
@@ -102,7 +114,7 @@ export async function GET(request: Request) {
         requestId: id,
         details: { name: err?.name, code: err?.code, message },
       },
-      { status: 500 },
+      { status: 500, headers: { "Cache-Control": "no-store" } },
     );
   }
 }
@@ -111,12 +123,18 @@ export async function POST(request: Request) {
   try {
     const body = (await request.json()) as { gameId?: string; state?: GameState };
     if (!body.gameId || !body.state) {
-      return NextResponse.json({ error: "gameId and state required" }, { status: 400 });
+      return NextResponse.json(
+        { error: "gameId and state required" },
+        { status: 400, headers: { "Cache-Control": "no-store" } },
+      );
     }
 
     const current = await getState(body.gameId);
     if (current && body.state.version <= current.version) {
-      return NextResponse.json({ state: current, ignored: true }, { status: 200 });
+      return NextResponse.json(
+        { state: current, ignored: true },
+        { status: 200, headers: { "Cache-Control": "no-store" } },
+      );
     }
 
     const now = Date.now();
@@ -132,7 +150,10 @@ export async function POST(request: Request) {
     };
     await setState(body.gameId, nextState);
 
-    return NextResponse.json({ state: nextState });
+    return NextResponse.json(
+      { state: nextState },
+      { status: 200, headers: { "Cache-Control": "no-store" } },
+    );
   } catch (error) {
     const id = requestId();
     console.error(`[${id}] POST /api/relay/state error:`, error);
@@ -145,7 +166,7 @@ export async function POST(request: Request) {
         requestId: id,
         details: { name: err?.name, code: err?.code, message },
       },
-      { status: 500 },
+      { status: 500, headers: { "Cache-Control": "no-store" } },
     );
   }
 }

@@ -21,15 +21,24 @@ export async function GET(request: Request) {
     const token = searchParams.get("token");
 
     if (!gameId || !playerId || !token) {
-      return NextResponse.json({ error: "gameId, playerId, token required" }, { status: 400 });
+      return NextResponse.json(
+        { error: "gameId, playerId, token required" },
+        { status: 400, headers: { "Cache-Control": "no-store" } },
+      );
     }
 
     const messages = await pullInboxMessages(gameId, playerId, token);
     if (!messages) {
-      return NextResponse.json({ error: "unauthorized" }, { status: 403 });
+      return NextResponse.json(
+        { error: "unauthorized" },
+        { status: 403, headers: { "Cache-Control": "no-store" } },
+      );
     }
 
-    return NextResponse.json({ messages });
+    return NextResponse.json(
+      { messages },
+      { status: 200, headers: { "Cache-Control": "no-store" } },
+    );
   } catch (error) {
     const id = requestId();
     console.error(`[${id}] GET /api/relay/inbox error:`, error);
@@ -38,7 +47,7 @@ export async function GET(request: Request) {
       typeof err?.message === "string" ? sanitizeErrorMessage(err.message) : "unknown_error";
     return NextResponse.json(
       { error: "internal_error", requestId: id, details: { name: err?.name, code: err?.code, message } },
-      { status: 500 },
+      { status: 500, headers: { "Cache-Control": "no-store" } },
     );
   }
 }
@@ -51,15 +60,24 @@ export async function POST(request: Request) {
       message?: SecretMessage;
     };
     if (!body.gameId || !body.playerId || !body.message) {
-      return NextResponse.json({ error: "gameId, playerId, message required" }, { status: 400 });
+      return NextResponse.json(
+        { error: "gameId, playerId, message required" },
+        { status: 400, headers: { "Cache-Control": "no-store" } },
+      );
     }
 
     const pushed = await pushInboxMessage(body.gameId, body.playerId, body.message);
     if (!pushed) {
-      return NextResponse.json({ error: "player_not_registered" }, { status: 404 });
+      return NextResponse.json(
+        { error: "player_not_registered" },
+        { status: 404, headers: { "Cache-Control": "no-store" } },
+      );
     }
 
-    return NextResponse.json({ ok: true });
+    return NextResponse.json(
+      { ok: true },
+      { status: 200, headers: { "Cache-Control": "no-store" } },
+    );
   } catch (error) {
     const id = requestId();
     console.error(`[${id}] POST /api/relay/inbox error:`, error);
@@ -68,7 +86,7 @@ export async function POST(request: Request) {
       typeof err?.message === "string" ? sanitizeErrorMessage(err.message) : "unknown_error";
     return NextResponse.json(
       { error: "internal_error", requestId: id, details: { name: err?.name, code: err?.code, message } },
-      { status: 500 },
+      { status: 500, headers: { "Cache-Control": "no-store" } },
     );
   }
 }
