@@ -43,6 +43,7 @@ export async function POST(request: Request) {
     if (!body.gameId || !body.event) {
       return NextResponse.json({ error: "gameId and event required" }, { status: 400 });
     }
+    const event = body.event;
 
     // If a JOIN happens before the creator successfully publishes state (common with QR joins),
     // create a placeholder lobby state (version 0). The creator's real state (version 1+)
@@ -86,6 +87,35 @@ export async function POST(request: Request) {
     const index = await addEvent(body.gameId, body.event);
     if (index === null) {
       return NextResponse.json({ duplicated: true }, { status: 200 });
+    }
+
+    // Simplify + stabilize: for JOIN events, also update lobby state server-side.
+    // This prevents the "waiting for master" dead-end when the master isn't processing events quickly.
+    if (event.type === "JOIN") {
+      const current = await getState(body.gameId);
+      if (current && current.phase === "LOBBY") {
+        const already = current.players.some((p) => p.id === event.payload.playerId);
+        if (!already) {
+          const now = Date.now();
+          const next: GameState = {
+            ...current,
+            // Keep existing master; don't replace it on join.
+            players: [
+              ...current.players,
+              {
+                id: event.payload.playerId,
+                name: event.payload.name,
+                alive: true,
+                joinedAt: now,
+                lastSeenAt: now,
+              },
+            ],
+            version: current.version + 1,
+            updatedAt: now,
+          };
+          await setState(body.gameId, next);
+        }
+      }
     }
 
     return NextResponse.json({ index });

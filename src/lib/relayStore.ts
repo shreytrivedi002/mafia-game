@@ -109,6 +109,27 @@ export async function addEvent(gameId: string, event: RelayEvent): Promise<numbe
   const db = client.db(DB_NAME);
 
   const eventKey = `${gameId}:${event.id}`;
+
+  // Ensure JOIN always registers inbox, even if the event is duplicated/retried.
+  if (event.type === "JOIN") {
+    const { playerId, token } = event.payload;
+    await db.collection<InboxDoc>(COLLECTIONS.inbox).updateOne(
+      { _id: `${gameId}:${playerId}` },
+      {
+        $set: {
+          gameId,
+          playerId,
+          token,
+          updatedAt: Date.now(),
+        },
+        $setOnInsert: {
+          messages: [],
+        },
+      },
+      { upsert: true },
+    );
+  }
+
   // Atomically allocate the next event index (use pre-increment value).
   // If the game doc doesn't exist yet, index starts at 1.
   const before = await db.collection<RelayGameDoc>(COLLECTIONS.games).findOneAndUpdate(
@@ -137,25 +158,6 @@ export async function addEvent(gameId: string, event: RelayEvent): Promise<numbe
       return null;
     }
     throw error;
-  }
-
-  if (event.type === "JOIN") {
-    const { playerId, token } = event.payload;
-    await db.collection<InboxDoc>(COLLECTIONS.inbox).updateOne(
-      { _id: `${gameId}:${playerId}` },
-      {
-        $set: {
-          gameId,
-          playerId,
-          token,
-          updatedAt: Date.now(),
-        },
-        $setOnInsert: {
-          messages: [],
-        },
-      },
-      { upsert: true },
-    );
   }
 
   return index;
