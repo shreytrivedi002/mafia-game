@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import type { GameState } from "@/lib/types";
 import { getEvents, getState, setState } from "@/lib/relayStore";
+import clientPromise from "@/lib/mongodb";
 
 function sanitizeErrorMessage(message: string): string {
   return message
@@ -121,15 +122,41 @@ export async function GET(request: Request) {
 
 export async function POST(request: Request) {
   try {
-    const body = (await request.json()) as { gameId?: string; state?: GameState };
-    if (!body.gameId || !body.state) {
+    const body = (await request.json()) as {
+      gameId?: string;
+      state?: GameState;
+      actor?: { playerId: string; token: string };
+    };
+    if (!body.gameId || !body.state || !body.actor?.playerId || !body.actor?.token) {
       return NextResponse.json(
-        { error: "gameId and state required" },
+        { error: "gameId, state, actor required" },
         { status: 400, headers: { "Cache-Control": "no-store" } },
       );
     }
 
     const current = await getState(body.gameId);
+    if (current) {
+      // Only the current master can publish state.
+      if (current.masterPlayerId !== body.actor.playerId) {
+        return NextResponse.json(
+          { error: "not_master", masterPlayerId: current.masterPlayerId },
+          { status: 403, headers: { "Cache-Control": "no-store" } },
+        );
+      }
+      // Token check against inbox
+      const client = await clientPromise;
+      const db = client.db("mafia");
+      const inbox = await db
+        .collection<{ _id: string; token: string }>("inbox")
+        .findOne({ _id: `${body.gameId}:${body.actor.playerId}` });
+      if (!inbox || inbox.token !== body.actor.token) {
+        return NextResponse.json(
+          { error: "unauthorized" },
+          { status: 403, headers: { "Cache-Control": "no-store" } },
+        );
+      }
+    }
+
     if (current && body.state.version <= current.version) {
       return NextResponse.json(
         { state: current, ignored: true },

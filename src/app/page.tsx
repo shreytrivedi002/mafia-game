@@ -292,17 +292,30 @@ async function relayGetState(gameId: string): Promise<GameState | null> {
   return data.state;
 }
 
-async function relaySetState(gameId: string, state: GameState): Promise<GameState | null> {
+async function relaySetState(
+  gameId: string,
+  state: GameState,
+  actor: { playerId: string; token: string },
+): Promise<GameState | null> {
   const res = await fetch("/api/relay/state", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ gameId, state }),
+    body: JSON.stringify({ gameId, state, actor }),
   });
   if (!res.ok) {
     return null;
   }
   const data = (await res.json()) as { state: GameState };
   return data.state;
+}
+
+async function relayClaimMaster(gameId: string, playerId: string, token: string) {
+  const res = await fetch("/api/relay/master", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ gameId, playerId, token }),
+  });
+  return res.ok ? ((await res.json()) as { state: GameState }) : null;
 }
 
 async function relaySendEvent(gameId: string, event: RelayEvent) {
@@ -610,34 +623,8 @@ export default function Home() {
     };
   }, [client, gameState, isMaster]);
 
-  useEffect(() => {
-    if (!client || !gameState || isMaster) {
-      return;
-    }
-    const isStale = lastStateAt ? Date.now() - lastStateAt > MASTER_STALE_MS : false;
-    if (!isStale) {
-      autoTakeoverAttemptVersionRef.current = null;
-      return;
-    }
-    const attemptVersion = gameState.version;
-    if (autoTakeoverAttemptVersionRef.current === attemptVersion) {
-      return;
-    }
-    const sortedIds = [...gameState.players].map((p) => p.id).sort();
-    const shouldAutoTakeover = sortedIds[0] === client.playerId;
-    if (!shouldAutoTakeover) {
-      autoTakeoverAttemptVersionRef.current = attemptVersion;
-      return;
-    }
-    autoTakeoverAttemptVersionRef.current = attemptVersion;
-    const next = {
-      ...gameState,
-      masterPlayerId: client.playerId,
-      version: gameState.version + 1,
-      updatedAt: Date.now(),
-    };
-    publishState(next);
-  }, [client, gameState, isMaster, lastStateAt]);
+  // Removed client-side auto takeover. Master changes must be server-authoritative
+  // to prevent split-brain (two devices becoming master).
 
   useEffect(() => {
     if (!client || !gameState || !isMaster || !gameState.settings?.autoAdvance) {
@@ -757,7 +744,13 @@ export default function Home() {
   const publishState = async (next: GameState) => {
     const sanitizedPlayers = stripRoles(next.players);
     const prepared = { ...next, players: sanitizedPlayers };
-    const updated = await relaySetState(next.id, prepared);
+    if (!client) {
+      return;
+    }
+    const updated = await relaySetState(next.id, prepared, {
+      playerId: client.playerId,
+      token: client.playerToken,
+    });
     if (updated) {
       setGameState(updated);
       storeLocalState(updated);
@@ -1188,12 +1181,20 @@ export default function Home() {
     if (!client || !gameState) {
       return;
     }
-    const next = {
-      ...gameState,
-      masterPlayerId: client.playerId,
-      version: gameState.version + 1,
-    };
-    publishState(next);
+    void (async () => {
+      const result = await relayClaimMaster(
+        gameState.id,
+        client.playerId,
+        client.playerToken,
+      );
+      if (result?.state) {
+        setGameState(result.state);
+        storeLocalState(result.state);
+        setStatusMessage("You are now the master device.");
+      } else {
+        setStatusMessage("Could not take over. Another master is active.");
+      }
+    })();
   };
 
   const handleInstallPWA = async () => {
