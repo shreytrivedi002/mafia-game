@@ -89,19 +89,43 @@ export async function POST(request: Request) {
       return NextResponse.json({ duplicated: true }, { status: 200 });
     }
 
-    // Simplify + stabilize: for JOIN events, also update lobby state server-side.
-    // This prevents the "waiting for master" dead-end when the master isn't processing events quickly.
+    // Simple + reliable: JOIN always appends the player to state.players server-side.
+    // This makes state the source of truth (not the master device), eliminating lobby desync.
     if (event.type === "JOIN") {
+      const now = Date.now();
       const current = await getState(body.gameId);
-      if (current && current.phase === "LOBBY") {
-        const already = current.players.some((p) => p.id === event.payload.playerId);
-        if (!already) {
-          const now = Date.now();
+
+      const base: GameState =
+        current ??
+        ({
+          id: body.gameId,
+          status: "ACTIVE",
+          phase: "LOBBY",
+          currentNight: 0,
+          phaseId: undefined,
+          phaseStartedAt: now,
+          settings: {
+            nightSeconds: 60,
+            daySeconds: 120,
+            votingSeconds: 60,
+            autoAdvance: true,
+            revealRoleOnDeath: false,
+          },
+          masterPlayerId: event.payload.playerId,
+          version: 0,
+          players: [],
+          createdAt: now,
+          updatedAt: now,
+        } as GameState);
+
+      // Only allow joining during lobby (otherwise we'd leak late joins mid-game).
+      if (base.phase === "LOBBY") {
+        const exists = base.players.some((p) => p.id === event.payload.playerId);
+        if (!exists) {
           const next: GameState = {
-            ...current,
-            // Keep existing master; don't replace it on join.
+            ...base,
             players: [
-              ...current.players,
+              ...base.players,
               {
                 id: event.payload.playerId,
                 name: event.payload.name,
@@ -110,7 +134,9 @@ export async function POST(request: Request) {
                 lastSeenAt: now,
               },
             ],
-            version: current.version + 1,
+            // Keep existing master if present.
+            masterPlayerId: base.masterPlayerId ?? event.payload.playerId,
+            version: (base.version ?? 0) + 1,
             updatedAt: now,
           };
           await setState(body.gameId, next);
